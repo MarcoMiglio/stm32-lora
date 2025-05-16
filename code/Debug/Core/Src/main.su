@@ -1,0 +1,16 @@
+../Core/Src/main.c:84:5:main	8	static
+../Core/Src/main.c:132:6:SystemClock_Config	96	static
+../Core/Src/main.c:188:13:MX_LPTIM1_Init	8	static
+../Core/Src/main.c:222:13:MX_RTC_Init	8	static
+../Core/Src/main.c:258:13:MX_SPI3_Init	8	static
+../Core/Src/main.c:298:13:MX_USART2_UART_Init	8	static
+../Core/Src/main.c:333:13:MX_GPIO_Init	48	static
+../Core/Src/main.c:408:17:get_precision_tick	16	static,ignoring_inline_asm
+../Core/Src/main.c:418:13:precision_sleep_until	32	static
+../Core/Src/main.c:457:16:get_battery_level	4	static
+../Core/Src/main.c:471:6:enterStopMode	8	static
+../Core/Src/main.c:493:6:MySystemClock_Config	96	static
+../Core/Src/main.c:555:6:HAL_LPTIM_AutoReloadMatchCallback	16	static
+../Core/Src/main.c:560:6:HAL_LPTIM_CompareMatchCallback	16	static
+../Core/Src/main.c:565:6:HAL_GPIO_EXTI_Callback	16	static
+../Core/Src/main.c:585:6:Error_Handler	4	static,ignoring_inline_asm
