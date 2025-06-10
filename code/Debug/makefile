@@ -60,8 +60,8 @@ all: main-build
 main-build: stm32L4_lora.elf secondary-outputs
 
 # Tool invocations
-stm32L4_lora.elf stm32L4_lora.map: $(OBJS) $(USER_OBJS) C:\Users\LabMeas\Desktop\MarcoMiglio\work_lora\code\STM32L476RGTX_FLASH.ld makefile objects.list $(OPTIONAL_TOOL_DEPS)
-	arm-none-eabi-gcc -o "stm32L4_lora.elf" @"objects.list" $(USER_OBJS) $(LIBS) -mcpu=cortex-m4 -T"C:\Users\LabMeas\Desktop\MarcoMiglio\work_lora\code\STM32L476RGTX_FLASH.ld" --specs=nosys.specs -Wl,-Map="stm32L4_lora.map" -Wl,--gc-sections -static --specs=nano.specs -mfpu=fpv4-sp-d16 -mfloat-abi=hard -mthumb -Wl,--start-group -lc -lm -Wl,--end-group
+stm32L4_lora.elf stm32L4_lora.map: $(OBJS) $(USER_OBJS) /Users/marcomiglio/Work/UNISI/works/stm32-lora/code/STM32L476RGTX_FLASH.ld makefile objects.list $(OPTIONAL_TOOL_DEPS)
+	arm-none-eabi-gcc -o "stm32L4_lora.elf" @"objects.list" $(USER_OBJS) $(LIBS) -mcpu=cortex-m4 -T"/Users/marcomiglio/Work/UNISI/works/stm32-lora/code/STM32L476RGTX_FLASH.ld" --specs=nosys.specs -Wl,-Map="stm32L4_lora.map" -Wl,--gc-sections -static --specs=nano.specs -mfpu=fpv4-sp-d16 -mfloat-abi=hard -mthumb -Wl,--start-group -lc -lm -Wl,--end-group
 	@echo 'Finished building target: $@'
 	@echo ' '
 

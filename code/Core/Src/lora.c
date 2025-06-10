@@ -30,7 +30,7 @@ static const uint32_t RFM95_BW_HZ[] = {
 };
 
 /*
- * Lookup table for BW (in Hz)
+ * Lookup table for BW (bits)
  */
 static const uint32_t RFM95_BW_BIN[] = {
     0b0110,   // RFM95_BW62_5
@@ -206,6 +206,15 @@ static bool rfm95_modify_CR_BW(rfm95_handle_t *handle){
  * @return: false if an error occurred, true otherwise
  */
 static bool rfm95_modify_frequency(rfm95_handle_t *handle){
+  uint32_t frequency = handle->config.channel_freq;
+
+  // FQ = (FRF * 32 Mhz) / (2 ^ 19)
+  uint64_t frf = ((uint64_t)frequency << 19) / RFM95_TCXO_FREQ;
+
+  if (!write_register(handle, RFM95_REGISTER_FR_MSB, (uint8_t)(frf >> 16))) return false;
+  if (!write_register(handle, RFM95_REGISTER_FR_MID, (uint8_t)(frf >> 8))) return false;
+  if (!write_register(handle, RFM95_REGISTER_FR_LSB, (uint8_t)(frf >> 0))) return false;
+
 	return true;
 }
 
@@ -217,6 +226,8 @@ static bool rfm95_modify_frequency(rfm95_handle_t *handle){
  * @return: false if an error occurred, true otherwise
  */
 static bool rfm95_modify_syncWord(rfm95_handle_t *handle){
+  if (!write_register(handle, RFM95_REGISTER_SYNC_WORD, handle->config.sync_word)) return false;
+
 	return true;
 }
 
@@ -228,22 +239,45 @@ static bool rfm95_modify_syncWord(rfm95_handle_t *handle){
  * - CR = 4/5
  * - BW = 125 kHz
  * - synchWord = 0x12
- * - channel Freq. = 868.1 MHz
+ * - channel Freq. = 868 MHz
  *
  * @param *handle rfm95_handle_t structure containing RFM95 configurations and function pointers.
  *
  * @return void.
  */
-static void config_load_default(rfm95_handle_t *handle)
-{
+static void config_load_default(rfm95_handle_t *handle){
   if (handle->config.sf == 0) 					rfm95_set_SF(handle, RFM95_SF7);
   if (handle->config.cr == 0) 					rfm95_set_CR(handle, RFM95_CR4_5);
   if (handle->config.tx_power == 0)  		rfm95_set_power(handle, 14);
   if (handle->config.bandwidth == 0) 		rfm95_set_BW(handle, RFM95_BW125);
-  if (handle->config.sync_word == 0) 		rfm95_set_syncWord(handle, 0x12);
-  if (handle->config.channel_freq == 0) rfm95_set_frequency(handle, 868100000);
+  if (handle->config.sync_word == 0) 		rfm95_set_syncWord(handle, LORA_DEF_SYNC_WORD);
+  if (handle->config.channel_freq == 0) rfm95_set_frequency(handle, 868000000);
 
   return;
+}
+
+/* Wait for a single interrupt event. If exceeds the timeout threshold, the while execution
+ * is interrupted.
+ *
+ * This function is used for interrupts on DIO5 pin (wait for the rfm95 module to be ready after changing operating mode)
+ * and on DIO0 pin during TX (wait for TX done event).
+ *
+ * @param *handle    rfm95_handle_t structure containing RFM95 configurations
+ * @param interrupt  rfm95_interrupt_t defining the interrupt event to wait for (DIO0, DIO1, DIO5 supported in this version)
+ * @param timeout_ms uint32_t defining the maximum timeout in ms.
+ *
+ * @return true if an interrupt is received within the specified timeout, false otherwise
+ */
+static bool wait_for_irq(rfm95_handle_t *handle, rfm95_interrupt_t interrupt, uint32_t timeout_ms) {
+  uint32_t timeout_tick = handle->get_precision_tick() + timeout_ms * handle->precision_tick_frequency / 1000;
+
+  while (handle->interrupt_times[interrupt] == 0) {
+    if (handle->get_precision_tick() >= timeout_tick) {
+      return false;
+    }
+  }
+
+  return true;
 }
 
 
@@ -253,7 +287,48 @@ static void config_load_default(rfm95_handle_t *handle)
 // -------------------------------- USER PUBLIC FUNCTIONS -------------------------------
 
 uint16_t rfm95_init(rfm95_handle_t *handle){
-	return 1;
+
+
+  reset(handle);
+
+  // setup default configurations:
+  config_load_default(handle);
+
+  // Check for correct version.
+  uint8_t version;
+  if (!read_register(handle, RFM95_REGISTER_VERSION, &version, 1)) return false;
+  if (version != RFM9x_VER) return false;
+
+  // Module must be placed in sleep mode before switching to LoRa.
+  if (!write_register(handle, RFM95_REGISTER_OP_MODE, RFM95_OP_MODE_SLEEP)) return false;
+  if (!write_register(handle, RFM95_REGISTER_OP_MODE, RFM95_OP_MODE_LORA_SLEEP)) return false;
+
+  // Default interrupt configuration, must be done to prevent DIO5 clock interrupts at 1Mhz
+  if (!write_register(handle, RFM95_REGISTER_DIO_MAPPING_1, RFM95_DIO_MAPPING_1_IRQ_FOR_RXDONE)) return false;
+
+  if (handle->on_after_interrupts_configured != NULL) {
+    handle->on_after_interrupts_configured();
+  }
+
+  // Set LNA to the highest gain with 150% boost (suggested in AN)
+  if (!write_register(handle, RFM95_REGISTER_LNA, 0x23)) return false;
+
+  // Preamble set to 10 + 4.25 = 14.25 symbols
+  if (!write_register(handle, RFM95_REGISTER_PREAMBLE_MSB, 0x00)) return false;
+  if (!write_register(handle, RFM95_REGISTER_PREAMBLE_LSB, 0x0A)) return false;
+
+  // Set up TX and RX FIFO base addresses.
+  if (!write_register(handle, RFM95_REGISTER_FIFO_TX_BASE_ADDR, RFM95_FIFO_TX_BASE_ADDRESS)) return false;
+  if (!write_register(handle, RFM95_REGISTER_FIFO_RX_BASE_ADDR, RFM95_FIFO_RX_BASE_ADDRESS)) return false;
+
+  // Maximum payload length of the RFM95 is 0xFF.
+  if (!write_register(handle, RFM95_REGISTER_MAX_PAYLOAD_LENGTH, 0xFF)) return false;
+
+  // Let module sleep after initialization.
+  if (!write_register(handle, RFM95_REGISTER_OP_MODE, RFM95_OP_MODE_LORA_SLEEP)) return false;
+  handle->rfm_status = SLEEP_MODE;
+
+  return true;
 }
 
 /* This function drives the RFM95 rest pin low to force an hardware reset.
@@ -368,21 +443,230 @@ void rfm95_set_frequency(rfm95_handle_t *handle, uint32_t freq){
 void rfm95_set_syncWord(rfm95_handle_t *handle, uint8_t syncWord){
 	uint8_t sync = syncWord;
 
-	if(sync == 0x34) sync = 0x12;
+	if(sync == 0x34) sync = LORA_DEF_SYNC_WORD;
 	handle->config.sync_word = sync;
 	return;
 }
 
-uint16_t rfm95_send(rfm95_handle_t *handle, const uint8_t *send_data, size_t send_data_length){
+/* This function allows to read the RSSI of the latest received packet.
+ * IMPORTANT SNR register must be read before switching RFM95 to standby (i.e. immediately after receiving
+ * a new packet).
+ *
+ * @param *handle  rfm95_handle_t   structure containing RFM95 configurations and function pointers.
+ * @param *int16_t rssi             this variable will store the actual rssi value.
+ *
+ * @return true if no errors occurred.
+ */
+bool rfm95_getRSSI(rfm95_handle_t *handle, int16_t *rssi){
+  uint8_t read;
+  if(!read_register(handle, RFM95_REGISTER_PKT_RSSI, &read, 1)) return false;
+
+  *rssi = -157 + read;
+  return true;
+}
+
+/* This function allows to read the SNR of the latest received packet.
+ * IMPORTANT RSSI register must be read before switching RFM95 to standby (i.e. immediately after receiving
+ * a new packet).
+ *
+ * @param *handle  rfm95_handle_t   structure containing RFM95 configurations and function pointers.
+ * @param *int16_t snr              this variable will store the actual snr value.
+ *
+ * @return true if no errors occurred.
+ */
+bool rfm95_getSNR(rfm95_handle_t *handle, int8_t *snr){
+  uint8_t read;
+  if(!read_register(handle, RFM95_REGISTER_PACKET_SNR, &read, 1)) return false;
+
+  *snr =  (((int8_t)read)/4);
+  return true;
+}
+
+/* Get live indication of LoRa modem status:
+ * bit4 set -> modem clear
+ * bit3 set -> Header info valid (valid CRC detected)
+ * bit2 set -> RX on-going
+ * bit1 set -> signal synchronized (end of preamble, modem in in lock)
+ * bit0 set -> signal detected (valid LoRa preamble detected)
+ *
+ * The user is expected to manually scan those bits to get the current modem operating mode.
+ *
+ * @param *handle  rfm95_handle_t   structure containing RFM95 configurations and function pointers.
+ * @param *uint8_t status           this variable will store only the 5 LSBs of the modem status register (1st 3 bits ignored).
+ *
+ * @return true if no errors occurred.
+ */
+bool rfm95_getModemStatus(rfm95_handle_t *handle, uint8_t *status){
+  uint8_t read;
+  if(!read_register(handle, RFM95_REGISTER_MODEM_STATUS, &read, 1)) return false;
+
+  *status = read & 0x1F;
+  return true;
+}
+
+/* This function sets rfm95 in standby mode.
+ *
+ * @param *handle rfm95_handle_t structure containing RFM95 configurations and function pointers
+ *
+ * @return true if no errors occurred
+ */
+bool rfm95_stdby(rfm95_handle_t *handle){
+  // Move modem to LoRa standby
+  if (!write_register(handle, RFM95_REGISTER_OP_MODE, RFM95_OP_MODE_LORA_STANDBY)) return false;
+
+  // Wait for the modem to be ready
+  if (!wait_for_irq(handle, RFM95_INTERRUPT_DIO5, RFM95_WAKEUP_TIMEOUT)) return false;
+
+  handle->rfm_status = STNBY_MODE;
+
+  return true;
+}
+
+/* This function allows to set RFM in TX mode and waits until the process is completed
+ * or a timeout is generated.
+ *
+ * @param *handle  rfm95_handle_t   structure containing RFM95 configurations and function pointers.
+ * @param *uint8_t senda_daya       pointer to data buffer to be transmitted.
+ * @param size_t   send_data_length size for the TX buffer
+ *
+ * @return true if no errors occurred.
+ */
+bool rfm95_send(rfm95_handle_t *handle, const uint8_t *send_data, size_t send_data_length){
+
+  // make changes effective
+  if (!rfm95_modify_power(handle))     return false;
+  if (!rfm95_modify_SF(handle))        return false;
+  if (!rfm95_modify_frequency(handle)) return false;
+  if (!rfm95_modify_CR_BW(handle))     return false;
+  if (!rfm95_modify_syncWord(handle))  return false;
+
+  // Set the payload length.
+  if (!write_register(handle, RFM95_REGISTER_PAYLOAD_LENGTH, send_data_length)) return false;
+
+  // Enable tx-done interrupt, clear flags and previous interrupt time
+  if (!write_register(handle, RFM95_REGISTER_DIO_MAPPING_1, RFM95_DIO_MAPPING_1_IRQ_FOR_TXDONE)) return false;
+  if (!write_register(handle, RFM95_REGISTER_IRQ_FLAGS, 0xFF)) return false;
+  handle->interrupt_times[RFM95_INTERRUPT_DIO0] = 0;
+  handle->interrupt_times[RFM95_INTERRUPT_DIO1] = 0;
+  handle->interrupt_times[RFM95_INTERRUPT_DIO5] = 0;
+
+  // Move modem to LoRa standby
+  if (handle->rfm_status != STNBY_MODE){
+    if (!write_register(handle, RFM95_REGISTER_OP_MODE, RFM95_OP_MODE_LORA_STANDBY)) return false;
+
+    // Wait for the modem to be ready
+    if (!wait_for_irq(handle, RFM95_INTERRUPT_DIO5, RFM95_WAKEUP_TIMEOUT)) return false;
+    handle->rfm_status = STNBY_MODE;
+  }
+
+  // Set pointer to start of TX section in FIFO
+  if (!write_register(handle, RFM95_REGISTER_FIFO_ADDR_PTR, RFM95_FIFO_TX_BASE_ADDRESS)) return false;
+
+  // Write payload to FIFO.
+  for (size_t i = 0; i < send_data_length; i++) {
+    write_register(handle, RFM95_REGISTER_FIFO_ACCESS, send_data[i]);
+  }
+
+  // Set modem to tx mode.
+  if (!write_register(handle, RFM95_REGISTER_OP_MODE, RFM95_OP_MODE_LORA_TX)) return false;
+
+  // Wait for the transfer complete interrupt.
+  if (!wait_for_irq(handle, RFM95_INTERRUPT_DIO0, RFM95_SEND_TIMEOUT)) return false;
+  handle->rfm_status = TRANSMIT_MODE;
+
+  // LSE Tick corresponding to the end of TX --> not needed here
+  uint32_t tx_ticks = handle->interrupt_times[RFM95_INTERRUPT_DIO0];
+  handle->interrupt_times[RFM95_INTERRUPT_DIO0] = 0;
+
+  // Return modem to sleep.
+  if (!write_register(handle, RFM95_REGISTER_OP_MODE, RFM95_OP_MODE_LORA_SLEEP)) return false;
+  handle->rfm_status = SLEEP_MODE;
+
+  return 1;
+}
+
+/* This function allows to set RFM in RX continuous mode. RX DONE interrupt on DIO0 is enabled, i.e.
+ * the MCU can move to other tasks waiting for IRQ event.
+ *
+ * @param *handle  rfm95_handle_t   structure containing RFM95 configurations and function pointers.
+ *
+ * @return true if no errors occurred.
+ */
+bool rfm95_enter_rx_mode(rfm95_handle_t *handle){
+
+  // Clear flags and previous interrupt time, configure mapping for RX done.
+  if (!write_register(handle, RFM95_REGISTER_DIO_MAPPING_1, RFM95_DIO_MAPPING_1_IRQ_FOR_RXDONE)) return false;
+  if (!write_register(handle, RFM95_REGISTER_IRQ_FLAGS, 0xFF)) return false;
+  handle->interrupt_times[RFM95_INTERRUPT_DIO0] = 0;
+  handle->interrupt_times[RFM95_INTERRUPT_DIO1] = 0;
+  handle->interrupt_times[RFM95_INTERRUPT_DIO5] = 0;
+
+  // Move modem to LoRa standby
+  if (handle->rfm_status != STNBY_MODE){
+    if (!write_register(handle, RFM95_REGISTER_OP_MODE, RFM95_OP_MODE_LORA_STANDBY)) return false;
+
+    // Wait for the modem to be ready.
+    if (!wait_for_irq(handle, RFM95_INTERRUPT_DIO5, RFM95_WAKEUP_TIMEOUT)) return false;
+    handle->rfm_status = STNBY_MODE;
+  }
+
+  // Enter RX CONT mode
+  if (!write_register(handle, RFM95_REGISTER_OP_MODE, RFM95_OP_MODE_LORA_RX_CONT)) return false;
+  handle->rfm_status = RXCONTIN_MODE;
+
 	return 1;
 }
 
-uint16_t rfm95_enter_rx_mode(rfm95_handle_t *handle){
-	return 1;
-}
+/* This function allows reading the latest received packet from the RFM internal FIFO.
+ *
+ * @param *handle  rfm95_handle_t   structure containing RFM95 configurations and function pointers.
+ * @param *uint8_t rx_buff          will contain the received payload.
+ * @param size_t   rx_data_length   will contain the received number of bytes.
+ *
+ * @return true if no errors occurred.
+ */
+bool rfm95_receive(rfm95_handle_t *handle, uint8_t *rx_buff, uint8_t *rx_data_length){
 
-uint16_t rfm95_receive(rfm95_handle_t *handle, const uint8_t *rx_buff){
-	return 1;
+  // Move modem to LoRa standby.
+  if (handle->rfm_status != STNBY_MODE){
+    if (!write_register(handle, RFM95_REGISTER_OP_MODE, RFM95_OP_MODE_LORA_STANDBY)) return false;
+
+    // Wait for the modem to be ready.
+    if (!wait_for_irq(handle, RFM95_INTERRUPT_DIO5, RFM95_WAKEUP_TIMEOUT)) return false;
+    handle->rfm_status = STNBY_MODE;
+  }
+
+  // proceed with payload extraction:
+  uint8_t irq_flags;
+  read_register(handle, RFM95_REGISTER_IRQ_FLAGS, &irq_flags, 1);
+
+  // Check if there was a CRC error.
+  if (irq_flags & RFM95_PAYLOAD_CRC_ERR_MSK) {
+   // Return modem to sleep.
+   if (!write_register(handle, RFM95_REGISTER_OP_MODE, RFM95_OP_MODE_LORA_SLEEP)) return false;
+   handle->rfm_status = SLEEP_MODE;
+   return false;
+  }
+
+  // Read received payload length.
+  uint8_t rx_bytes;
+  if (!read_register(handle, RFM95_REGISTER_FIFO_RX_BYTES_NB, &rx_bytes, 1)) return false;
+
+  // Read packet location within the FIFO buffer
+  uint8_t fifo_rx_entry;
+  if (!read_register(handle, RFM95_REGISTER_FIFO_RX_CURR_ADDR, &fifo_rx_entry, 1)) return false;
+
+  // Read received payload itself.
+  if (!write_register(handle, RFM95_REGISTER_FIFO_ADDR_PTR, fifo_rx_entry)) return false;
+  if (!read_register(handle, RFM95_REGISTER_FIFO_ACCESS, rx_buff, rx_bytes)) return false;
+
+  // Return modem to sleep --> needed to clear the FIFO
+  if (!write_register(handle, RFM95_REGISTER_OP_MODE, RFM95_OP_MODE_LORA_SLEEP)) return false;
+  handle->rfm_status = SLEEP_MODE;
+
+  *rx_data_length = rx_bytes;
+
+	return true;
 }
 
 
@@ -394,25 +678,7 @@ uint16_t rfm95_receive(rfm95_handle_t *handle, const uint8_t *rx_buff){
  *
  * @return void.
  */
-void rfm95_on_interrupt(rfm95_handle_t *handle, rfm95_interrupt_t interrupt)
-{
+void rfm95_on_interrupt(rfm95_handle_t *handle, rfm95_interrupt_t interrupt) {
   handle->interrupt_times[interrupt] = handle->get_precision_tick();
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 

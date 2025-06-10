@@ -22,6 +22,7 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "lora.h"
+#include "stdio.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -53,6 +54,12 @@ UART_HandleTypeDef huart2;
 volatile uint32_t lptim_tick_msb = 0;
 uint32_t lse_clk = (1<<15);
 
+// ------------- RFM95 ---------------
+bool rfm_flag;
+volatile bool pkt_received = false;
+uint8_t rx_buff[255];
+uint8_t rx_data_length;
+
 
 /* USER CODE END PV */
 
@@ -64,9 +71,12 @@ static void MX_RTC_Init(void);
 static void MX_SPI3_Init(void);
 static void MX_LPTIM1_Init(void);
 /* USER CODE BEGIN PFP */
+int _write(int file, char *ptr, int len);
+
 static uint32_t get_precision_tick();
 static void 		precision_sleep_until(uint32_t target_ticks);
 static uint8_t	get_battery_level();
+static void     rfm95_after_interrupts_configured();
 
 void MySystemClock_Config(void);
 void enterStopMode();
@@ -112,15 +122,79 @@ int main(void)
   MX_LPTIM1_Init();
   /* USER CODE BEGIN 2 */
 
+  HAL_LPTIM_Counter_Start_IT(&hlptim1, 0xFFFF);
+
+  // config RFM95
+  rfm95_handle.spi_handle = &hspi3;
+  rfm95_handle.nrst_port  = RFM95_RST_GPIO_Port;
+  rfm95_handle.nrst_pin   = RFM95_RST_Pin;
+  rfm95_handle.nss_port   = RFM95_CS_GPIO_Port;
+  rfm95_handle.nss_pin    = RFM95_CS_Pin;
+
+  rfm95_handle.precision_tick_frequency = lse_clk;
+  rfm95_handle.precision_tick_drift_ns_per_s = 20000;
+  rfm95_handle.get_precision_tick = get_precision_tick;
+  rfm95_handle.precision_sleep_until = precision_sleep_until;
+  rfm95_handle.on_after_interrupts_configured = rfm95_after_interrupts_configured;
+  //rfm95_handle.random_int = random_int;
+  rfm95_handle.get_battery_level = get_battery_level;
+
+  // Modify parameters here:
+  rfm95_set_power(&rfm95_handle, 2); // power 2 dBm - 17 dBm
+  rfm95_set_frequency(&rfm95_handle, 868000000);
+
+  // initialize RFM95
+  if(!rfm95_init(&rfm95_handle)) printf("Err init\r\n");
+
+  uint8_t buff[1] = {0x01};
+  uint32_t next_tick = 0*lse_clk;
+
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
+    if(get_precision_tick() > next_tick){
+      printf("transmitting\r\n");
+      if(!rfm95_send(&rfm95_handle, buff, 1)) printf("Error sending\r\n");
+
+      next_tick = get_precision_tick() + 10*lse_clk;
+    }
+
+    if(!rfm95_enter_rx_mode(&rfm95_handle)) printf("Err entering RX\r\n");
+
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
+
+    while(!pkt_received & (get_precision_tick() < next_tick));
+
+    int8_t  snr;
+    int16_t rssi;
+    if(!rfm95_getSNR(&rfm95_handle, &snr))   printf("Err reading snr\r\n");
+    if(!rfm95_getRSSI(&rfm95_handle, &rssi)) printf("Err reading rssi\r\n");
+
+    if(!rfm95_stdby(&rfm95_handle)) printf("Err entering standby\r\n");
+
+    if (pkt_received){
+
+      uint8_t status;
+      if(!rfm95_getModemStatus(&rfm95_handle, &status))printf("Err reading status\r\n");
+      printf("Modem stat %d\r\n", status);
+
+      pkt_received = false;
+      if(!rfm95_receive(&rfm95_handle, &rx_buff[0], &rx_data_length)) printf("Err Rx\r\n");
+      else printf("pkt received: %d\r\n", rx_data_length);
+
+      for(uint8_t i = 0; i < rx_data_length; i++)printf("0x%X ", rx_buff[i]);
+      printf("\r\n");
+
+      printf("SNR:  %i\r\n", snr);
+      printf("RSSI: %i\r\n", rssi);
+    }
+
+
   }
   /* USER CODE END 3 */
 }
@@ -273,7 +347,7 @@ static void MX_SPI3_Init(void)
   hspi3.Init.CLKPolarity = SPI_POLARITY_LOW;
   hspi3.Init.CLKPhase = SPI_PHASE_1EDGE;
   hspi3.Init.NSS = SPI_NSS_SOFT;
-  hspi3.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_8;
+  hspi3.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_16;
   hspi3.Init.FirstBit = SPI_FIRSTBIT_MSB;
   hspi3.Init.TIMode = SPI_TIMODE_DISABLE;
   hspi3.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;
@@ -390,8 +464,8 @@ static void MX_GPIO_Init(void)
   HAL_NVIC_SetPriority(EXTI9_5_IRQn, 0, 0);
   HAL_NVIC_EnableIRQ(EXTI9_5_IRQn);
 
-  HAL_NVIC_SetPriority(EXTI15_10_IRQn, 0, 0);
-  HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
+//  HAL_NVIC_SetPriority(EXTI15_10_IRQn, 0, 0);
+//  HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
 
   /* USER CODE BEGIN MX_GPIO_Init_2 */
 
@@ -456,6 +530,15 @@ static void precision_sleep_until(uint32_t target_ticks){
 
 static uint8_t get_battery_level(){
 	return 0;
+}
+
+/*
+ * This function is executed after initializing rfm95 (ready to accept interrupts
+ * without hard fault errors)
+ */
+void rfm95_after_interrupts_configured(){
+  HAL_NVIC_SetPriority(EXTI15_10_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
 }
 
 
@@ -567,6 +650,10 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin){
 	// Events on RFM95 interrupt pins
   if (GPIO_Pin == RFM95_DIO0_Pin) {
     rfm95_on_interrupt(&rfm95_handle, RFM95_INTERRUPT_DIO0);
+
+    // something received
+    if(rfm95_handle.rfm_status == RXCONTIN_MODE) pkt_received = true;
+
   } else if (GPIO_Pin == RFM95_DIO1_Pin) {
     rfm95_on_interrupt(&rfm95_handle, RFM95_INTERRUPT_DIO1);
   } else if (GPIO_Pin == RFM95_DIO5_Pin) {
@@ -575,6 +662,14 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin){
 }
 
 // ----------------------------------------------------------------------------------------
+
+
+
+int _write(int file, char *ptr, int len)
+{
+  HAL_UART_Transmit(&huart2, (uint8_t *)ptr, len, HAL_MAX_DELAY);
+  return len;
+}
 
 /* USER CODE END 4 */
 

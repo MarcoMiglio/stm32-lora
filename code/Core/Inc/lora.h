@@ -19,10 +19,13 @@
 
 // -------------------------- RFM generic settings ----------------------------------
 
+#define RFM9x_VER             0x12
+
 #define RFM95_INTERRUPT_COUNT 3 // DIO0, DIO1, DIO5 interrupt events
 #define RFM95_SPI_TIMEOUT     10
 #define RFM95_WAKEUP_TIMEOUT  10
 #define RFM95_SEND_TIMEOUT    2000
+#define RFM95_TCXO_FREQ       32000000 // RFM95 mounts 32 MHz XTAL
 // ----------------------------------------------------------------------------------
 
 
@@ -30,6 +33,7 @@
 #define LOW_FREQ_BAND_EU868   863000000
 #define HIGH_FREQ_BAND_EU868  870000000
 #define MAX_EIRP_EU           16
+#define LORA_DEF_SYNC_WORD    0x12
 // -----------------------------------------------------------------------------------
 
 
@@ -48,9 +52,12 @@
 #define RFM95_REGISTER_FIFO_ADDR_PTR                   0x0D
 #define RFM95_REGISTER_FIFO_TX_BASE_ADDR               0x0E
 #define RFM95_REGISTER_FIFO_RX_BASE_ADDR               0x0F
+#define RFM95_REGISTER_FIFO_RX_CURR_ADDR               0x10
 #define RFM95_REGISTER_IRQ_FLAGS 		               		 0x12
 #define RFM95_REGISTER_FIFO_RX_BYTES_NB                0x13
+#define RFM95_REGISTER_MODEM_STATUS                    0x18
 #define RFM95_REGISTER_PACKET_SNR                      0x19
+#define RFM95_REGISTER_PKT_RSSI                        0x1A
 #define RFM95_REGISTER_MODEM_CONFIG_1                  0x1D
 #define RFM95_REGISTER_MODEM_CONFIG_2                  0x1E
 #define RFM95_REGISTER_SYMB_TIMEOUT_LSB                0x1F
@@ -86,13 +93,17 @@
 #define RFM95_DIO_MAPPING_1_IRQ_FOR_TXDONE             0x40
 #define RFM95_DIO_MAPPING_1_IRQ_FOR_RXDONE             0x00
 
+#define RFM95_REG_INVERT_IQ1_RST                       0x26
+#define RFM95_REG_INVERT_IQ2_RST                       0x1D
+
 #define RFM95_INVERT_IQ_1_TX                           0x27
 #define RFM95_INVERT_IQ_2_TX                           0x1d
-
 
 #define RFM95_INVERT_IQ_1_RX                           0x67
 #define RFM95_INVERT_IQ_2_RX                           0x19
 
+#define RFM95_RX_DONE_MSK                              0x40
+#define RFM95_PAYLOAD_CRC_ERR_MSK                      0x20
 
 // ----------------------------------------------------------------------------------------------------
 
@@ -129,13 +140,23 @@ typedef uint8_t (*rfm95_get_battery_level)();
 
 
 
-// --------------------------------- RFM95 handler / Structures ----------------------------------------
+// --------------------------------- RFM95 handler / Structures -----------------------------------------
+
+/**
+ * Track RFM95 different operating modes
+ */
+typedef enum{
+  SLEEP_MODE,
+  STNBY_MODE,
+  TRANSMIT_MODE,
+  RXCONTIN_MODE,
+  RXSINGLE_MODE
+} rfm95_status;
 
 /*
  * Interrupt events registered into the dedicated interrupt buffer
  */
-typedef enum
-{
+typedef enum {
   RFM95_INTERRUPT_DIO0,
   RFM95_INTERRUPT_DIO1,
   RFM95_INTERRUPT_DIO5
@@ -304,6 +325,11 @@ typedef struct {
 	volatile uint32_t interrupt_times[RFM95_INTERRUPT_COUNT];
 
 	/**
+	 * RFM95 current status:
+	 */
+	volatile rfm95_status rfm_status;
+
+	/**
 	 * LoRa parameters (power - SF - CR - channel frequency - bandwidth).
 	 */
 	rfm95_config_t config;
@@ -336,11 +362,19 @@ void rfm95_set_frequency(rfm95_handle_t *handle, uint32_t freq);
 
 void rfm95_set_syncWord(rfm95_handle_t *handle, uint8_t syncWord);
 
-uint16_t rfm95_send(rfm95_handle_t *handle, const uint8_t *send_data, size_t send_data_length);
+bool rfm95_getRSSI(rfm95_handle_t *handle, int16_t *rssi);
 
-uint16_t rfm95_enter_rx_mode(rfm95_handle_t *handle);
+bool rfm95_getSNR(rfm95_handle_t *handle, int8_t *snr);
 
-uint16_t rfm95_receive(rfm95_handle_t *handle, const uint8_t *rx_buff);
+bool rfm95_getModemStatus(rfm95_handle_t *handle, uint8_t *status);
+
+bool rfm95_stdby(rfm95_handle_t *handle);
+
+bool rfm95_send(rfm95_handle_t *handle, const uint8_t *send_data, size_t send_data_length);
+
+bool rfm95_enter_rx_mode(rfm95_handle_t *handle);
+
+bool rfm95_receive(rfm95_handle_t *handle, uint8_t *rx_buff, uint8_t *rx_data_length);
 
 void rfm95_on_interrupt(rfm95_handle_t *handle, rfm95_interrupt_t interrupt);
 
