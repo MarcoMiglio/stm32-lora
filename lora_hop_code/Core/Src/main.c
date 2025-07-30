@@ -777,6 +777,7 @@ bool init_rfm(){
   rfm95_set_BW(&rfm95_handle, LORA_BW);
   rfm95_set_CR(&rfm95_handle, LORA_CR);
   rfm95_set_SF(&rfm95_handle, LORA_SF);
+  rfm95_set_syncWord(&rfm95_handle, LORA_SYNC_WORD);
 
   // initialize RFM95
   if(!rfm95_init(&rfm95_handle)) return false;
