@@ -324,6 +324,13 @@ uint16_t rfm95_init(rfm95_handle_t *handle){
   // Maximum payload length of the RFM95 is 0xFF.
   if (!write_register(handle, RFM95_REGISTER_MAX_PAYLOAD_LENGTH, 0xFF)) return false;
 
+  // make changes effective
+  if (!rfm95_modify_power(handle))     return false;
+  if (!rfm95_modify_SF(handle))        return false;
+  if (!rfm95_modify_frequency(handle)) return false;
+  if (!rfm95_modify_CR_BW(handle))     return false;
+  if (!rfm95_modify_syncWord(handle))  return false;
+
   // Let module sleep after initialization.
   if (!write_register(handle, RFM95_REGISTER_OP_MODE, RFM95_OP_MODE_LORA_SLEEP)) return false;
   handle->rfm_status = SLEEP_MODE;

@@ -172,6 +172,9 @@ events_flags on_tx_event(rfm95_handle_t* h_rfm, h_rx_tx* h_fifo){
     return app_flags;
   }
 
+  /* set standby mode to read data from rfm95 */
+  if(!rfm95_stdby(h_rfm)) app_flags.err_flags |= EVT_RFM_SPI_ERR;
+
   /* clear flags */
   app_flags.err_flags &= 0x00;
 

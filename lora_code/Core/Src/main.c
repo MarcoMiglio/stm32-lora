@@ -140,17 +140,20 @@ int main(void)
   rfm95_handle.get_battery_level = get_battery_level;
 
   // Modify parameters here:
-  rfm95_set_power(&rfm95_handle, 10); // power 2 dBm - 17 dBm
-  rfm95_set_frequency(&rfm95_handle, 869400000);
-  rfm95_set_BW(&rfm95_handle, RFM95_BW250);
+  rfm95_set_power(&rfm95_handle, 2); // power 2 dBm - 17 dBm
+  rfm95_set_frequency(&rfm95_handle, 868000000);
+  rfm95_set_BW(&rfm95_handle, RFM95_BW125);
   rfm95_set_CR(&rfm95_handle, RFM95_CR4_5);
-  rfm95_set_SF(&rfm95_handle, RFM95_SF9);
+  rfm95_set_SF(&rfm95_handle, RFM95_SF7);
+  rfm95_set_syncWord(&rfm95_handle, 0xBA);
 
   // initialize RFM95
   if(!rfm95_init(&rfm95_handle)) printf("Err init\r\n");
 
+  if(!rfm95_enter_rx_mode(&rfm95_handle)) printf("Err entering RX\r\n");
+
   uint8_t buff[1] = {0x01};
-  uint32_t next_tick = 0*lse_clk;
+  uint32_t next_tick = 10*lse_clk;
 
   /* USER CODE END 2 */
 
@@ -162,7 +165,7 @@ int main(void)
       printf("transmitting\r\n");
       if(!rfm95_send(&rfm95_handle, buff, 1)) printf("Error sending\r\n");
 
-      next_tick = get_precision_tick() + 1000*lse_clk;
+      next_tick = get_precision_tick() + 5*lse_clk;
     }
 
     if(!rfm95_enter_rx_mode(&rfm95_handle)) printf("Err entering RX\r\n");
@@ -178,7 +181,7 @@ int main(void)
     if(!rfm95_getSNR(&rfm95_handle, &snr))   printf("Err reading snr\r\n");
     if(!rfm95_getRSSI(&rfm95_handle, &rssi)) printf("Err reading rssi\r\n");
 
-    if(!rfm95_stdby(&rfm95_handle)) printf("Err entering standby\r\n");
+    //if(!rfm95_stdby(&rfm95_handle)) printf("Err entering standby\r\n");
 
     if (pkt_received){
 
