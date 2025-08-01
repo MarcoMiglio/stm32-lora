@@ -31,7 +31,7 @@ extern "C" {
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include "sys_settings.h"
 /* USER CODE END Includes */
 
 /* Exported types ------------------------------------------------------------*/
@@ -67,6 +67,14 @@ typedef struct{
   Sys_state state;
 } Sys_handler;
 
+
+/*
+ *
+ */
+typedef struct{
+	uint8_t buff[LORA_PAYLOAD_MAX_SIZE];
+	uint8_t len;
+} test_buff;
 
 /* USER CODE END ET */
 

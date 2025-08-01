@@ -8,7 +8,7 @@
 #ifndef INC_SYS_SETTINGS_H_
 #define INC_SYS_SETTINGS_H_
 
-#include "main.h"
+//#include "main.h"
 
 // -------------------------- LORA SETTINGS -----------------------------------
 
@@ -87,6 +87,13 @@
 #define BC_TX_ATTEMPTS 3
 
 /*
+ * Sync word used to drop undesired PKTs
+ */
+#define SYNC_WORD_ENV 0xAA55
+#define SYNC_WORD_BC  0x11AA
+
+
+/*
  * Define interval boundaries for random wait time for the TX
  * of a PKT when it joins the RX FIFO
  *
@@ -129,6 +136,7 @@
  *
  */
 #define MASK_BYTES       1
+#define SYNC_WORD_BYTES  2
 #define NODE_ID_BYTES    1
 #define BC_ID_BYTES      1
 #define PKT_ID_BYTES     2
@@ -140,7 +148,8 @@
  * This masks are used to identify the position of each byte-field
  * in the received payload
  */
-#define MASK_POS 0
+#define SYNC_WORD_POS  0
+#define MASK_POS       SYNC_WORD_POS + SYNC_WORD_BYTES
 
 #define MASK_ALARM_BIT (1 << 0)
 #define RETX_ALARM_BIT (1 << 1)
@@ -158,6 +167,7 @@
 
 /*
  * Maximum size for a received payload
+ * - 2 bytes for SYNC word
  * - 1 byte for masks
  * - 1 byte node ID
  * - 2 bytes pktID
@@ -166,16 +176,17 @@
  * - BC_NUMBER * (1 byte) is the maximum number of bytes used for the hopping sequence
  *   (when the pkt hops thorugh all the intermediate nodes)
  */
-#define LORA_PAYLOAD_MAX_SIZE MASK_BYTES + NODE_ID_BYTES + PKT_ID_BYTES + RSSI_BYTES + SENSOR_PLD_BYTES + (BC_ID_BYTES * BC_NUMBER)
+#define LORA_PAYLOAD_MAX_SIZE SYNC_WORD_BYTES + MASK_BYTES + NODE_ID_BYTES + PKT_ID_BYTES + RSSI_BYTES + SENSOR_PLD_BYTES + (BC_ID_BYTES * BC_NUMBER)
 
 /*
  * Payload size receiving from end-node
+ * - 2 bytes for SYNC word
  * - 1 byte for masks
  * - 1 byte node ID
  * - 2 bytes pktID
  * - SENSOR_PLD_BYTES bytes for sensors
  */
-#define ENV_NODE_PYL_SIZE MASK_BYTES + NODE_ID_BYTES + PKT_ID_BYTES + SENSOR_PLD_BYTES
+#define ENV_NODE_PYL_SIZE SYNC_WORD_BYTES + MASK_BYTES + NODE_ID_BYTES + PKT_ID_BYTES + SENSOR_PLD_BYTES
 
 // -----------------------------------------------------------------------------
 

@@ -24,7 +24,6 @@
 #include "stdio.h"
 #include "string.h"
 #include "lora.h"
-#include "sys_settings.h"
 #include "buff_manager.h"
 #include "app_events.h"
 /* USER CODE END Includes */
@@ -92,7 +91,20 @@ uint32_t tx_evt_time = 0;
 // ----------- RX-TX FIFO -------------
 events_flags app_flags = {0};           // handle status flags from RX TX buffers operation
 
+// --------- Variables used for simulation ---------
 volatile bool tx_evt = false;
+
+uint8_t tx_seq_idx = 0;
+
+// --------- Build some random payloads ------------
+uint8_t pyl1[SENSOR_PLD_BYTES] = {0xAA,0xAA,0xBB,0xBB};
+uint8_t pyl1_len = 4;
+
+uint8_t pyl2[SENSOR_PLD_BYTES] = {0xCC,0xDD};
+uint8_t pyl2_len = 2;
+
+uint8_t pyl3[SENSOR_PLD_BYTES] = {0xEE,0xFF,0xDD,0xFF,0xEE,0x00,0x00,0xFF};
+uint8_t pyl3_len = 8;
 
 /* USER CODE END PV */
 
@@ -123,10 +135,57 @@ void MySystemClock_Config(void);
 void enterStopMode();
 
 void print_LL();
+void build_pkt(uint16_t sync, uint8_t mask, uint8_t nodeID, uint16_t pktID, uint8_t* sensors, uint8_t sens_len,
+		           int16_t rssi, uint8_t* bc_seq, uint8_t bc_seq_len, uint8_t* t_buff, uint8_t* t_buff_len);
+
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+
+// -------------- Define here the test sequence ----------------
+
+// ----> ENV NODE 1 (define here PKTs from operator 1)
+test_buff e1_p1_bc22  = {0};
+test_buff e1_p1_bc54  = {0};
+test_buff e1_p1_bc543 = {0};
+test_buff e1_p1_bc51  = {0};
+test_buff e1_p1_bc64  = {0};
+test_buff e1_p2_bc41  = {0};
+test_buff e1_p1_bc21  = {0};
+test_buff e1_p1_bc31  = {0};
+test_buff e1_p2_bc22  = {0};
+test_buff e1_p2_bc43  = {0};
+
+// ----> ENV NODE 2 (define here PKTs from operator 2)
+test_buff e2_p1_bc51  = {0};
+
+// ----> ENV NODE 3 (define here PKTs from operator 3)
+test_buff e3_p1_bc53  = {0};
+test_buff e3_p1_bc64  = {0};
+
+
+// ----> GENERAL BUFF (This one defines the test TX sequence)
+test_buff* test_buffs[] = {
+		&e1_p1_bc543,
+		&e1_p1_bc51,
+		&e1_p1_bc54,
+		&e1_p2_bc43,
+//		&e1_p1_bc64,
+//		&e1_p1_bc22,
+		&e1_p1_bc22,
+		&e1_p2_bc22,
+		&e1_p1_bc64,
+		&e1_p1_bc22,
+//		&e1_p1_bc21,
+//		&e1_p2_bc41,
+//		&e1_p1_bc31,
+//		&e2_p1_bc51,
+		&e3_p1_bc53,
+		&e3_p1_bc64
+};
+
+#define TEST_SEQ_SIZE (sizeof(test_buffs)/sizeof(test_buffs[0]))
 
 /* USER CODE END 0 */
 
@@ -138,6 +197,79 @@ int main(void)
 {
 
   /* USER CODE BEGIN 1 */
+
+	// ---- POPOLATE TEST BUFFER ----
+  uint8_t bc_seq[20];
+
+  /*
+   * VARIABLES FOR BUILDING PKT ARRAY:
+   *
+   * uint8_t mask, uint8_t nodeID, uint16_t pktID, uint8_t* sensors, uint8_t sens_len,
+   * int16_t RSSI, uint8_t* bc_seq, uint8_t bc_seq_len, uint8_t* t_buff, uint8_t* t_buff_le
+   */
+
+	// ----> ENV NODE 1
+	build_pkt(SYNC_WORD_ENV, 0, 1, 1, pyl1, pyl1_len, 0, bc_seq, 0, e1_p1_bc22.buff, &e1_p1_bc22.len);
+
+	build_pkt(SYNC_WORD_ENV, 0, 1, 2, pyl2, pyl2_len, 0, bc_seq, 0, e1_p2_bc22.buff, &e1_p2_bc22.len);
+
+	bc_seq[0] = 5;
+	bc_seq[1] = 4;
+	build_pkt(SYNC_WORD_BC, 0, 1, 1, pyl1, pyl1_len, -89, bc_seq, 2, e1_p1_bc54.buff, &e1_p1_bc54.len);
+
+	bc_seq[0] = 5;
+	bc_seq[1] = 4;
+	bc_seq[2] = 2;
+	bc_seq[3] = 1;
+	build_pkt(SYNC_WORD_BC, 0, 1, 1, pyl1, pyl1_len, -89, bc_seq, 4, e1_p1_bc51.buff, &e1_p1_bc51.len);
+
+	bc_seq[0] = 5;
+	bc_seq[1] = 4;
+	bc_seq[2] = 3;
+	build_pkt(SYNC_WORD_BC, 0, 1, 1, pyl1, pyl1_len, -92, bc_seq, 3, e1_p1_bc543.buff, &e1_p1_bc543.len);
+
+	bc_seq[0] = 6;
+	bc_seq[1] = 5;
+	bc_seq[2] = 4;
+	build_pkt(SYNC_WORD_BC, 0, 1, 1, pyl1, pyl1_len, -99, bc_seq, 3, e1_p1_bc64.buff, &e1_p1_bc64.len);
+
+	bc_seq[0] = 2;
+	bc_seq[1] = 1;
+	build_pkt(SYNC_WORD_BC, 0, 1, 1, pyl1, pyl1_len, -123, bc_seq, 2, e1_p1_bc21.buff, &e1_p1_bc21.len);
+
+	bc_seq[0] = 3;
+	bc_seq[1] = 2;
+	bc_seq[2] = 1;
+	build_pkt(SYNC_WORD_BC, 0, 1, 1, pyl1, pyl1_len, -123, bc_seq, 3, e1_p1_bc31.buff, &e1_p1_bc31.len);
+
+	bc_seq[0] = 4;
+	bc_seq[1] = 3;
+	bc_seq[2] = 1;
+	build_pkt(SYNC_WORD_BC, 0, 1, 2, pyl3, pyl3_len, -74, bc_seq, 3, e1_p2_bc41.buff, &e1_p2_bc41.len);
+
+	bc_seq[0] = 4;
+	bc_seq[1] = 3;
+	build_pkt(SYNC_WORD_BC, 0, 1, 2, pyl3, pyl3_len, -78, bc_seq, 2, e1_p2_bc43.buff, &e1_p2_bc43.len);
+
+
+	// ----> ENV NODE 2
+	bc_seq[0] = 5;
+	bc_seq[1] = 3;
+	bc_seq[2] = 1;
+	build_pkt(SYNC_WORD_BC, 0, 2, 1, pyl2, pyl2_len,  -80, bc_seq, 3, e2_p1_bc51.buff, &e2_p1_bc51.len);
+
+
+	// ----> ENV NODE 3
+	bc_seq[0] = 5;
+	bc_seq[1] = 4;
+	bc_seq[2] = 3;
+	build_pkt(SYNC_WORD_BC, 0, 3, 1, pyl3, pyl3_len,  -91, bc_seq, 3, e3_p1_bc53.buff, &e3_p1_bc53.len);
+
+	bc_seq[0] = 6;
+	bc_seq[1] = 5;
+	bc_seq[2] = 4;
+	build_pkt(SYNC_WORD_BC, 0, 3, 1, pyl3, pyl3_len, -101, bc_seq, 3, e3_p1_bc64.buff, &e3_p1_bc64.len);
+
 
   /* USER CODE END 1 */
 
@@ -187,14 +319,21 @@ int main(void)
   	if (tx_evt == true) {
   		tx_evt = false;
 
-  		printf("TX\r\n");
+  		uint8_t c_len  = test_buffs[tx_seq_idx]->len;
+  		uint8_t c_node = test_buffs[tx_seq_idx]->buff[NODE_ID_POS];
+  		uint16_t c_pkt = ((uint16_t)(test_buffs[tx_seq_idx]->buff[PKT_ID_MSB_POS] << 8)) | test_buffs[tx_seq_idx]->buff[PKT_ID_LSB_POS];
+  		uint8_t  c_bc1 = test_buffs[tx_seq_idx]->buff[BC_ID1_POS];
+  		uint8_t  c_bcL = test_buffs[tx_seq_idx]->buff[c_len-1];
+
+  		printf("\n###### TX PKT E%d-P%d-%d%d\r\n",c_node,c_pkt,c_bc1,c_bcL);
 
   		/* Prepare TX buff here */
-  		uint8_t pyl_buff[LORA_PAYLOAD_MAX_SIZE];
-  		uint8_t pyl_len = 0;
 
   		/* TX payload here */
-			if (!rfm95_send(&rfm95_handle, pyl_buff, pyl_len)) printf("TX error");;
+			if (!rfm95_send(&rfm95_handle, test_buffs[tx_seq_idx]->buff, test_buffs[tx_seq_idx]->len)) printf("TX error");
+			tx_seq_idx+=1;
+
+			if (tx_seq_idx >= TEST_SEQ_SIZE) tx_seq_idx = 0;
 
   		/* set RFM95 back to continuous RX mode */
 			if(!rfm95_enter_rx_mode(&rfm95_handle)) printf("RFM err entering RX\r\n");
@@ -220,35 +359,51 @@ int main(void)
 
 				 if (rx_buff_len < ENV_NODE_PYL_SIZE) {
 
-					 printf("Drop PKT\r\n");
+					 printf("\nPKT too short, drop\r\n");
 
 				 } else {
 
-					 uint8_t  masks     = rx_buff[MASK_POS];
-					 uint8_t  node_id   = rx_buff[NODE_ID_POS];
-					 uint16_t pkt_id    = (rx_buff[PKT_ID_MSB_POS] << 8) | rx_buff[PKT_ID_LSB_POS];
+					 uint16_t sync = (uint16_t)((rx_buff[SYNC_WORD_POS] << 8) | (rx_buff[SYNC_WORD_POS+1]));
 
-					 uint8_t data[SENSOR_PLD_BYTES];
-					 memcpy(data, &rx_buff[SMPL_DATA_POS], SENSOR_PLD_BYTES);
+					 if (sync != SYNC_WORD_BC) { /* Check if TX comes from known BC node */
 
-					 int16_t rssi       = (int16_t) ((rx_buff[RSSI_POS] << 8) | rx_buff[RSSI_POS + 1]);
-					 uint8_t bc_id1     = rx_buff[BC_ID1_POS];
-					 uint8_t last_bc_id = rx_buff[rx_buff_len-1];
+						 printf("\nWrong SYNC,PKT drop\r\n");
 
-					 printf("\n###### RX PKT ######\r\n");
-					 printf("        MSK: %d\r\n", masks);
-					 printf("    NODE ID: %d\r\n", node_id);
-					 printf("     PKT ID: %d\r\n", pkt_id);
-					 printf("       RSSI: %i\r\n", rssi);
-					 printf("  1st BC ID: %d\r\n", bc_id1);
-					 printf(" last BC ID: %d\r\n", last_bc_id);
+					 } else {
 
-					 // plot payload:
-					 printf(" PYLD: ");
-					 for(uint8_t i = 0; i < SENSOR_PLD_BYTES; i++){
-						 printf("0x%02X ", data[i]);
+						 uint8_t  masks     = rx_buff[MASK_POS];
+						 uint8_t  node_id   = rx_buff[NODE_ID_POS];
+						 uint16_t pkt_id    = (rx_buff[PKT_ID_MSB_POS] << 8) | rx_buff[PKT_ID_LSB_POS];
+
+						 uint8_t data[SENSOR_PLD_BYTES];
+						 memcpy(data, &rx_buff[SMPL_DATA_POS], SENSOR_PLD_BYTES);
+
+						 int16_t rssi       = (int16_t) ((rx_buff[RSSI_POS] << 8) | rx_buff[RSSI_POS + 1]);
+						 uint8_t bc_id1     = rx_buff[BC_ID1_POS];
+						 uint8_t last_bc_id = rx_buff[rx_buff_len-1];
+
+						 uint8_t tx_bc_id   = 0;
+						 if (rx_buff_len >= ENV_NODE_PYL_SIZE + RSSI_BYTES + 2*BC_ID_BYTES) tx_bc_id = rx_buff[rx_buff_len-2];
+
+						 printf("\n###### RX PKT ######\r\n");
+						 printf("       SYNC: 0x%04X\r\n", sync);
+						 printf("        MSK: %d\r\n", masks);
+						 printf("    NODE ID: %d\r\n", node_id);
+						 printf("     PKT ID: %d\r\n", pkt_id);
+						 printf("       RSSI: %i\r\n", rssi);
+						 printf("  1st BC ID: %d\r\n", bc_id1);
+						 printf("   Tx BC ID: %d\r\n", tx_bc_id);
+						 printf(" last BC ID: %d\r\n", last_bc_id);
+
+						 // plot payload:
+						 printf(" PYLD: ");
+						 for(uint8_t i = 0; i < SENSOR_PLD_BYTES; i++){
+							 printf("0x%02X ", data[i]);
+						 }
+						 printf("\r\n");
+
 					 }
-					 printf("\r\n");
+
 				 }
 
 				 /* set RFM95 back to continuous RX mode */
@@ -1020,6 +1175,33 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin){
 
 
 // --------------------------------- DEBUG FUNCTIONS --------------------------------------
+
+void build_pkt(uint16_t sync, uint8_t mask, uint8_t nodeID, uint16_t pktID, uint8_t* sensors, uint8_t sens_len,
+		           int16_t rssi, uint8_t* bc_seq, uint8_t bc_seq_len, uint8_t* t_buff, uint8_t* t_buff_len){
+
+	t_buff[SYNC_WORD_POS]   = (uint8_t)((sync >> 8) & 0xFF);
+	t_buff[SYNC_WORD_POS+1] = (uint8_t)( sync & 0xFF);
+	t_buff[MASK_POS]        = mask;
+	t_buff[NODE_ID_POS]     = nodeID;
+	t_buff[PKT_ID_MSB_POS]  = (uint8_t)((pktID >> 8) & 0xFF);
+	t_buff[PKT_ID_LSB_POS]  = (uint8_t)(pktID & 0xFF);
+
+	memcpy(&t_buff[SMPL_DATA_POS],sensors, sens_len);
+
+	*t_buff_len = ENV_NODE_PYL_SIZE;
+
+	if(bc_seq_len != 0){
+
+		t_buff[RSSI_POS]        = (uint8_t)((rssi >> 8) & 0xFF);
+		t_buff[RSSI_POS+1]      = (uint8_t)(rssi & 0xFF);
+
+		memcpy(&t_buff[BC_ID1_POS],bc_seq,bc_seq_len);
+
+		*t_buff_len += (RSSI_BYTES + bc_seq_len);
+
+	}
+
+}
 
 void print_LL(){
 

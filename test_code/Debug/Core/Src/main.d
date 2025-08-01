@@ -31,9 +31,8 @@ Core/Src/main.o: ../Core/Src/main.c ../Core/Inc/main.h \
  ../Drivers/STM32L4xx_HAL_Driver/Inc/stm32l4xx_hal_spi_ex.h \
  ../Drivers/STM32L4xx_HAL_Driver/Inc/stm32l4xx_hal_uart.h \
  ../Drivers/STM32L4xx_HAL_Driver/Inc/stm32l4xx_hal_uart_ex.h \
- ../Core/Inc/lora.h ../Core/Inc/sys_settings.h ../Core/Inc/main.h \
- ../Core/Inc/buff_manager.h ../Core/Inc/LinkedList.h \
- ../Core/Inc/sys_settings.h ../Core/Inc/app_events.h \
+ ../Core/Inc/sys_settings.h ../Core/Inc/lora.h ../Core/Inc/buff_manager.h \
+ ../Core/Inc/LinkedList.h ../Core/Inc/app_events.h \
  ../Core/Inc/buff_manager.h ../Core/Inc/lora.h
 ../Core/Inc/main.h:
 ../Drivers/STM32L4xx_HAL_Driver/Inc/stm32l4xx_hal.h:
@@ -68,12 +67,10 @@ Core/Src/main.o: ../Core/Src/main.c ../Core/Inc/main.h \
 ../Drivers/STM32L4xx_HAL_Driver/Inc/stm32l4xx_hal_spi_ex.h:
 ../Drivers/STM32L4xx_HAL_Driver/Inc/stm32l4xx_hal_uart.h:
 ../Drivers/STM32L4xx_HAL_Driver/Inc/stm32l4xx_hal_uart_ex.h:
-../Core/Inc/lora.h:
 ../Core/Inc/sys_settings.h:
-../Core/Inc/main.h:
+../Core/Inc/lora.h:
 ../Core/Inc/buff_manager.h:
 ../Core/Inc/LinkedList.h:
-../Core/Inc/sys_settings.h:
 ../Core/Inc/app_events.h:
 ../Core/Inc/buff_manager.h:
 ../Core/Inc/lora.h:
