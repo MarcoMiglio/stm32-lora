@@ -79,7 +79,7 @@
 /*
  * BC_ID for this NODE
  */
-#define MY_BC_ID 1
+#define MY_BC_ID 2
 
 /*
  * Number of retransmissions before dropping a packet
@@ -87,13 +87,29 @@
 #define BC_TX_ATTEMPTS 3
 
 /*
+ * Sync word used to drop undesired PKTs
+ */
+#define SYNC_WORD_ENV 0xAA55
+#define SYNC_WORD_BC  0x11AA
+
+/*
  * Define interval boundaries for random wait time for the TX
- * of a PKT when it joins the RX FIFO
+ * of a PKT when it joins the RX FIFO (new PKT just received)
  *
  * Set MIN = MAX = 0 to skip the random wait and schedule an immediate transmission.
  */
-#define MIN_WAIT_TIME_1 150u   // In milliseconds
-#define MAX_WAIT_TIME_1 500u  // In milliseconds
+#define MIN_WAIT_TIME_NEW 0u  // In milliseconds
+#define MAX_WAIT_TIME_NEW 0u  // In milliseconds
+
+/*
+ * Define interval boundaries for random wait time for the TX
+ * of a PKT when "new PKTs" (i.e. with zero TX attempts) are
+ * waiting in queue
+ *
+ * Set MIN = MAX = 0 to skip the random wait and schedule an immediate transmission.
+ */
+#define MIN_WAIT_TIME_SHORT 200u  // In milliseconds
+#define MAX_WAIT_TIME_SHORT 500u  // In milliseconds
 
 /*
  * Define interval boundaries for random wait time for scheduling
@@ -101,8 +117,8 @@
  *
  * Set MIN = MAX = 0 to skip the random wait and schedule an immediate transmission.
  */
-#define MIN_WAIT_TIME 200u   // In milliseconds
-#define MAX_WAIT_TIME 5000u  // In milliseconds
+#define MIN_WAIT_TIME_LONG 200u   // In milliseconds
+#define MAX_WAIT_TIME_LONG 5000u  // In milliseconds
 
 // -----------------------------------------------------------------------------
 
@@ -112,6 +128,9 @@
 
 /*
  * Lebgth in bytes of each field in the BC packet
+ * - Sync word (2 bytes)  -> 0xAA55 for uplinks between ENV -> BC node
+ *                           0x11AA for communication NODE -> NODE
+ *
  * - Mask (1 byte)        -> bitfield to cotain different masks
  *                           - Alarm -> This is an alarm message, should take MAX priority
  *                           - RFU...
@@ -129,6 +148,7 @@
  *
  */
 #define MASK_BYTES       1
+#define SYNC_WORD_BYTES  2
 #define NODE_ID_BYTES    1
 #define BC_ID_BYTES      1
 #define PKT_ID_BYTES     2
@@ -140,7 +160,8 @@
  * This masks are used to identify the position of each byte-field
  * in the received payload
  */
-#define MASK_POS 0
+#define SYNC_WORD_POS  0
+#define MASK_POS       SYNC_WORD_POS + SYNC_WORD_BYTES
 
 #define MASK_ALARM_BIT (1 << 0)
 #define RETX_ALARM_BIT (1 << 1)
@@ -158,6 +179,7 @@
 
 /*
  * Maximum size for a received payload
+ * - 2 bytes for sync word
  * - 1 byte for masks
  * - 1 byte node ID
  * - 2 bytes pktID
@@ -166,16 +188,17 @@
  * - BC_NUMBER * (1 byte) is the maximum number of bytes used for the hopping sequence
  *   (when the pkt hops thorugh all the intermediate nodes)
  */
-#define LORA_PAYLOAD_MAX_SIZE MASK_BYTES + NODE_ID_BYTES + PKT_ID_BYTES + RSSI_BYTES + SENSOR_PLD_BYTES + (BC_ID_BYTES * BC_NUMBER)
+#define LORA_PAYLOAD_MAX_SIZE SYNC_WORD_BYTES + MASK_BYTES + NODE_ID_BYTES + PKT_ID_BYTES + RSSI_BYTES + SENSOR_PLD_BYTES + (BC_ID_BYTES * BC_NUMBER)
 
 /*
  * Payload size receiving from end-node
+ * - 2 bytes for sync word
  * - 1 byte for masks
  * - 1 byte node ID
  * - 2 bytes pktID
  * - SENSOR_PLD_BYTES bytes for sensors
  */
-#define ENV_NODE_PYL_SIZE MASK_BYTES + NODE_ID_BYTES + PKT_ID_BYTES + SENSOR_PLD_BYTES
+#define ENV_NODE_PYL_SIZE SYNC_WORD_BYTES + MASK_BYTES + NODE_ID_BYTES + PKT_ID_BYTES + SENSOR_PLD_BYTES
 
 // -----------------------------------------------------------------------------
 

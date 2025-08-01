@@ -152,11 +152,11 @@ uint16_t get_nextTX_pkt(h_rx_tx* h_rx_tx, fifo_entry_point entry_point, uint8_t*
       if(h_rx_tx->h_rx[rx_idx].pkt.tx_attempts > 0) break;
       idx = rx_idx;
 
+      // up to now all the pkts are "new" ones -> find the 1st one in the sequence
+      c_idx = get_prev_LL(h_rx_tx->h_tx, c_idx);
+
       // no remaining elements -> break here
       if (c_idx == LL_IDX_IS_HEAD) break;
-
-      // up pto know all the pkts are "new" ones -> find the 1st one in the sequence
-      c_idx = get_prev_LL(h_rx_tx->h_tx, c_idx);
     }
 
     // in the end -> if no "new" PKTs were present terminate here

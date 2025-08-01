@@ -28,7 +28,8 @@
  *          - EVT_RFM_SPI_ERR set if SPI error occured between RFM95 and MCU
  *          - EVT_RFM_RX_ERR set if error occured during RX operation (either due to SPI, or CRC failure)
  *          - EVT_RX_FIFO_FULL is set if the pkt was not added due to full RX FIFO
- *          - EVT_BAD_PKT_FORMAT is set if payload cannot be processed due to bad formatting
+ *          - EVT_BAD_PKT_FORMAT is set if payload cannot be processed due to bad formatting or
+ *                               neither SYNC_WORD_ENV nor SYNC_WORD_BC were recognized
  *
  *          STATUS FLAGS (in .status_flags field):
  *          - EVT_SCHEDULE_TX set if a new pkt has been added to the RX FIFO. The controller should TX
@@ -59,16 +60,24 @@ events_flags on_rx_event(rfm95_handle_t* h_rfm, h_rx_tx* h_fifo){
   if(!rfm95_enter_rx_mode(h_rfm)) app_flags.err_flags |= EVT_RFM_SPI_ERR;
 
   /* If any error occurred, stop code here */
-  //if(app_flags.err_flags != 0) return app_flags;
+  if(app_flags.err_flags != 0) return app_flags;
 
-  uint8_t sample_buffer[ENV_NODE_PYL_SIZE + 5];
-  for (uint16_t i = 0; i < ENV_NODE_PYL_SIZE + 5; i++) {
-    sample_buffer[i] = (uint8_t)(i & 0xFF);  // fill with some pattern
+//  uint8_t sample_buffer[ENV_NODE_PYL_SIZE + 5];
+//  for (uint16_t i = 0; i < ENV_NODE_PYL_SIZE + 5; i++) {
+//    sample_buffer[i] = (uint8_t)(i & 0xFF);  // fill with some pattern
+//  }
+//
+//  memcpy(rx_pkt.pl, sample_buffer, ENV_NODE_PYL_SIZE + 5);
+//  rx_pkt.pl_len = ENV_NODE_PYL_SIZE + 5;
+
+  /* preliminary check on payload size */
+  if (rx_pkt.pl_len < ENV_NODE_PYL_SIZE){
+    app_flags.err_flags |= EVT_BAD_PKT_FORMAT;
+    return app_flags;
   }
 
-  memcpy(rx_pkt.pl, sample_buffer, ENV_NODE_PYL_SIZE + 5);
-  rx_pkt.pl_len = ENV_NODE_PYL_SIZE + 5;
-
+  /* read received sync word */
+  uint16_t rx_sync = (uint16_t)((rx_pkt.pl[SYNC_WORD_POS] << 8) | rx_pkt.pl[SYNC_WORD_POS+1]);
 
   /* clear flags */
   app_flags.err_flags &= 0x00;
@@ -84,11 +93,11 @@ events_flags on_rx_event(rfm95_handle_t* h_rfm, h_rx_tx* h_fifo){
 
   // rx_bcID and tx_bcID depend on subsequent conditions
 
-  if (rx_pkt.pl_len == ENV_NODE_PYL_SIZE) {       /* receiving from an ENV NODE */
+  if ((rx_pkt.pl_len == ENV_NODE_PYL_SIZE) && (rx_sync == SYNC_WORD_ENV)) {       /* receiving from an ENV NODE */
 
     app_flags = process_envNode_up(h_fifo, &rx_pkt, rssi);
 
-  } else if (rx_pkt.pl_len > ENV_NODE_PYL_SIZE) { /* receiving fron BC NODE -> some hops happened */
+  } else if ((rx_pkt.pl_len > ENV_NODE_PYL_SIZE) && (rx_sync == SYNC_WORD_BC)) {  /* receiving fron BC NODE -> some hops happened */
 
     /*
      * if receiving from bcNode, at leat one Hop happened
@@ -161,7 +170,7 @@ events_flags on_tx_event(rfm95_handle_t* h_rfm, h_rx_tx* h_fifo){
   if(!rfm95_getModemStatus(h_rfm, &rfm_reg)) app_flags.err_flags |= EVT_RFM_SPI_ERR;
 
   /* If any error occurred, stop code here */
-  if(app_flags.err_flags != 0) return app_flags;
+  if(app_flags.err_flags != 0) goto cleanup;
 
   if((rfm_reg & 0x03) != 0) {
     /*
@@ -169,11 +178,12 @@ events_flags on_tx_event(rfm95_handle_t* h_rfm, h_rx_tx* h_fifo){
      * -> Skip this TX and wait for the end of the event
      */
     app_flags.status_flags |= EVT_RFM_MODEM_RX;
-    return app_flags;
+    goto cleanup;
   }
 
   /* set standby mode to read data from rfm95 */
   if(!rfm95_stdby(h_rfm)) app_flags.err_flags |= EVT_RFM_SPI_ERR;
+  if(app_flags.err_flags != 0) goto cleanup;
 
   /* clear flags */
   app_flags.err_flags &= 0x00;
@@ -187,7 +197,7 @@ events_flags on_tx_event(rfm95_handle_t* h_rfm, h_rx_tx* h_fifo){
   if(tx_idx == LL_BUFF_EMPTY) {                   /* No events to TX */
 
     app_flags.status_flags |= EVT_TX_FIFO_EMPTY;
-    return app_flags;
+    goto cleanup;
 
   } else if(tx_idx == RX_BUFF_IDX_NOT_DEFINED) {  /* No "New PKTs present */
 
@@ -200,11 +210,11 @@ events_flags on_tx_event(rfm95_handle_t* h_rfm, h_rx_tx* h_fifo){
 
   /* TX payload here */
   if (!rfm95_send(h_rfm, pyl_buff, pyl_len)) app_flags.err_flags |= EVT_RFM_SPI_ERR;
-  if(app_flags.err_flags != 0) return app_flags;
+  if(app_flags.err_flags != 0) goto cleanup;
 
   /* Set RFM back to RX mode */
   if (!rfm95_enter_rx_mode(h_rfm)) app_flags.err_flags |= EVT_RFM_SPI_ERR;
-  if(app_flags.err_flags != 0) return app_flags;
+  if(app_flags.err_flags != 0) goto cleanup;
 
   /* Update TX attempts for this PKT */
   h_fifo->h_rx[tx_idx].pkt.tx_attempts += 1;
@@ -234,6 +244,15 @@ events_flags on_tx_event(rfm95_handle_t* h_rfm, h_rx_tx* h_fifo){
   }
 
   return app_flags;
+
+  // Return statement -> Flags + RFM in RX mode
+  cleanup:
+    if (app_flags.status_flags & EVT_TX_FIFO_EMPTY){ // re-enter RX mode only if minor flag was set
+
+      if (!rfm95_enter_rx_mode(h_rfm)) app_flags.err_flags |= EVT_RFM_SPI_ERR;
+
+    }
+    return app_flags;
 }
 
 /*
@@ -248,8 +267,7 @@ events_flags on_tx_event(rfm95_handle_t* h_rfm, h_rx_tx* h_fifo){
  * - If coincident node IDs are found:
  *   - drop all pkts with pkt ID smaller than the rx pkt ID (older versions are removed)
  *   - for coincident pkt IDs and coincident 1st bc IDs:
- *        # if ACK or transmitted too many times, ignore the packet
- *        # otherwise keep only one copy (the one with less hops - less bytes to TX)
+ *        # keep only the copy in my RX FIFO
  *
  * - for coincident pkt IDs but differet 1st bc IDs, treat as different pkt since they
  *   carry different information
@@ -313,45 +331,12 @@ events_flags process_bcNode_up(h_rx_tx* h_fifo, bc_pkt* rx_pkt){
         } else if((rx_pkt->pktID == c_node.pkt.pktID)) {/* Same identical pktID (i.e. same information) */
 
           if (rx_pkt->rx_bcID == c_node.pkt.rx_bcID) {  /* Same "receive point" */
-            // same 1st bcID in the sequence of hops
+            /*
+             * In my FIFO i have a pkt identical to the RX one, but
+             * they followed different hops
+             */
 
-            if (c_node.pkt.ack || c_node.pkt.tx_attempts >= BC_TX_ATTEMPTS) { /* ACK or TX too many times */
-
-              /*
-               * In the FIFO there's already a pkt identical to the received one.
-               * But it has been ACK or TX many times -> ignore received packet
-               * and do not add to the buffer.
-               */
-              add_new_pkt = false;
-
-            } else { /* Not ACK and some TX attempts left */
-
-              /*
-               * In my FIFO i have a pkt identical to the RX one, but
-               * they followed different hops -> I keep only the shortest one
-               * (less bytes to TX)
-               */
-              if (c_node.pkt.pl_len <= rx_pkt->pl_len) {
-
-                // FIFO contains a pkt shorter than the received one
-                add_new_pkt = false;
-
-              } else {
-
-                // this pkt is not "new"
-                tx_new_pkt = false;
-
-                // received pkt is shorter -> replace (maintain tx attempts)
-                rx_pkt->tx_attempts = c_node.pkt.tx_attempts;
-
-                fifo_err_status = remove_pkt(h_fifo, i);
-
-                // Empty slot -> eligible for insertion
-                if (i <= add_idx) add_idx = i;
-
-              }
-
-            }
+            add_new_pkt = false;
 
             /*
              * pkt with identical node IDs, pkt IDs, 1st rx point.
@@ -496,11 +481,24 @@ events_flags process_envNode_up(h_rx_tx* h_fifo, bc_pkt* rx_pkt, int16_t rssi){
 
         } else if((rx_pkt->pktID == c_node.pkt.pktID)) {/* Same identical pktID (i.e. same information) */
 
-          /*
-           * The env node is adding redundancy, but i have already seen
-           * this PKT -> ignore
-           */
-          add_new_pkt = false;
+          if (c_node.pkt.rx_bcID == MY_BC_ID){
+            /*
+             * The env node is adding redundancy, but i have already seen
+             * this PKT -> ignore
+             */
+            add_new_pkt = false;
+            break;
+
+          } else {
+
+            /*
+             * I have a PKT form the same ENV NODE, with same PKTid,
+             * but the receive points are different -> treat as different infos
+             */
+            continue;
+
+          }
+
 
         } else {                                        /* Same node ID but older pkt ID -> ignore */
 
@@ -529,12 +527,17 @@ events_flags process_envNode_up(h_rx_tx* h_fifo, bc_pkt* rx_pkt, int16_t rssi){
 
   if (add_new_pkt == true) { /* If the flag is still set -> Add pkt */
 
+    // modify payload (change ENV_NODE_SYNC_WORD with BC_NODE_SYNC_WORD)
+    rx_pkt->pl[SYNC_WORD_POS]   = (uint8_t)((SYNC_WORD_BC >> 8) & 0xFF);
+    rx_pkt->pl[SYNC_WORD_POS+1] = (uint8_t)( SYNC_WORD_BC & 0xFF);
+
     // Receiving from ENV node -> add RSSI
     rx_pkt->pl[rx_pkt->pl_len]   = (uint8_t)((rssi >> 8) & 0xFF);
     rx_pkt->pl[rx_pkt->pl_len+1] = (uint8_t)(rssi & 0xFF);
     rx_pkt->pl_len += 2;
 
     // add my bc ID informations:
+    rx_pkt->rx_bcID = MY_BC_ID;
     rx_pkt->pl[rx_pkt->pl_len] = MY_BC_ID;
     rx_pkt->pl_len = rx_pkt->pl_len + 1;
 

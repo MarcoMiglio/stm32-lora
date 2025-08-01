@@ -173,7 +173,7 @@ int main(void)
   // init RF in RX mode
   if (!init_rfm()) printf("Error during RFM initialization\r\n");
 
-  h_sys.evt_flags |= SYS_EVT_RX_PENDING;
+  //h_sys.evt_flags |= SYS_EVT_RX_PENDING;
 
   /* USER CODE END 2 */
 
@@ -232,7 +232,9 @@ int main(void)
 
         printf("handle RX\r\n");
 
+        debug_pin_set();
         app_flags = on_rx_event(&rfm95_handle, &h_buffs);
+        debug_pin_rst();
 
         if (app_flags.err_flags) {           /* If any error occurred */
 
@@ -273,7 +275,7 @@ int main(void)
              *  New PKT pushed in the RX FIFO:
              *  Schedule TX event, and TX
              */
-            schedule_tx_evt(MIN_WAIT_TIME_1, MAX_WAIT_TIME_1);
+            schedule_tx_evt(MIN_WAIT_TIME_NEW, MAX_WAIT_TIME_NEW);
 
           }
 
@@ -291,7 +293,9 @@ int main(void)
 
         HAL_RTCEx_DeactivateWakeUpTimer(&hrtc);
 
+        debug_pin_set();
         app_flags = on_tx_event(&rfm95_handle, &h_buffs);
+        debug_pin_rst();
 
         if (app_flags.err_flags) {           /* If any error occurred */
 
@@ -311,7 +315,7 @@ int main(void)
 
             printf("Modem RX -> reschedule \r\n");
             //  RFM is receiving something wait for the end of RX event
-            schedule_tx_evt(MIN_WAIT_TIME_1, MAX_WAIT_TIME_1);
+            schedule_tx_evt(MIN_WAIT_TIME_SHORT, MAX_WAIT_TIME_SHORT);
 
           } else if (app_flags.status_flags & EVT_TX_FIFO_EMPTY){
 
@@ -322,13 +326,13 @@ int main(void)
 
             printf("PRI TX PKTs\r\n");
             // Other new PKTs are waiting for 1st TX
-            schedule_tx_evt(MIN_WAIT_TIME_1, MAX_WAIT_TIME_1);
+            schedule_tx_evt(MIN_WAIT_TIME_SHORT, MAX_WAIT_TIME_SHORT);
 
           } else if (app_flags.status_flags & EVT_SCHEDULE_TX){
 
             printf("Normal TX PKTs\r\n");
             // Schedule event for PKT retransmission mechanism
-            schedule_tx_evt(MIN_WAIT_TIME, MAX_WAIT_TIME);
+            schedule_tx_evt(MIN_WAIT_TIME_LONG, MAX_WAIT_TIME_LONG);
 
           } else {
             // RFU...
@@ -1019,6 +1023,7 @@ void enterStopMode(){
 
 	// Enable LPTIM again:
 	HAL_LPTIM_Counter_Start_IT(&hlptim1, 0xFFFF);
+
 }
 
 
