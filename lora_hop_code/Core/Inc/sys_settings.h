@@ -87,12 +87,18 @@
 #define BC_TX_ATTEMPTS 3
 
 /*
+ * TX limit for alarm PKTs
+ */
+#define ALARM_MAX_TX_ATTEMPTS 50
+
+/*
  * Sync word used to drop undesired PKTs
  */
 #define SYNC_WORD_ENV 0xAA55
 #define SYNC_WORD_BC  0x11AA
 
-/*
+/*[NEW PKT WAIT --> VALID FOR BOTH NORMAL - ALARM PKTs]
+ *
  * Define interval boundaries for random wait time for the TX
  * of a PKT when it joins the RX FIFO (new PKT just received)
  *
@@ -101,7 +107,18 @@
 #define MIN_WAIT_TIME_NEW 0u  // In milliseconds
 #define MAX_WAIT_TIME_NEW 0u  // In milliseconds
 
-/*
+/*[ALRM ACK WAIT --> ONLY FOR ALARM PKTs]
+ *
+ * Random wait time before sending ACK on request during
+ * ALARM operation (ACK msg for a node behind me)
+ *
+ * Set MIN = MAX = 0 to skip the random wait and schedule an immediate transmission.
+ */
+#define MIN_WAIT_TIME_ALRM_ACK 0u   // In milliseconds
+#define MAX_WAIT_TIME_ALRM_ACK 0u   // In milliseconds
+
+/*[ReTX SHORT WAIT --> BOTH NORMAL - ALARM PKTs]
+ *
  * Define interval boundaries for random wait time for the TX
  * of a PKT when "new PKTs" (i.e. with zero TX attempts) are
  * waiting in queue
@@ -111,7 +128,8 @@
 #define MIN_WAIT_TIME_SHORT 200u  // In milliseconds
 #define MAX_WAIT_TIME_SHORT 500u  // In milliseconds
 
-/*
+/*[ReTX LONG WAIT --> ONLY FOR NORMAL PKTs]
+ *
  * Define interval boundaries for random wait time for scheduling
  * retransmission attempts in case ACK is not received
  *
@@ -120,6 +138,51 @@
 #define MIN_WAIT_TIME_LONG 200u   // In milliseconds
 #define MAX_WAIT_TIME_LONG 5000u  // In milliseconds
 
+/*[ReTX LONG WAIT --> ONLY FOR ALARM PKTs]
+ *
+ * Define interval boundaries for random wait time for scheduling
+ * retransmission attempts for NACK ALARM PKTs
+ *
+ * Set MIN = MAX = 0 to skip the random wait and schedule an immediate transmission.
+ */
+#define MIN_WAIT_ALRM_RETX 200u   // In milliseconds
+#define MAX_WAIT_ALRM_RETX 1000u  // In milliseconds
+
+/*
+ * TODO
+ */
+#define ALARM_TIMEOUT_MS 10 * 1000 // In ms
+
+// -----------------------------------------------------------------------------
+
+
+// --------------------------- RTC VARIABLES (RFU) -----------------------------
+
+/*
+ * Modify these 3 if needed
+ */
+#define START_DAY    0x01
+#define START_MONTH  0x08
+#define START_YEAR   0x25
+
+/*
+ * Constants that shouldn't be accessed
+ */
+
+// BCD to Decimal macro -> Convert RTC format into deciamal values
+#define BCD_TO_DEC(x)    (((x) >> 4) * 10 + ((x) & 0x0F))
+
+#define START_DAY_DEC     BCD_TO_DEC(START_DAY)
+#define START_MONTH_DEC   BCD_TO_DEC(START_MONTH)
+#define START_YEAR_DEC    BCD_TO_DEC(START_YEAR)
+
+#define MS_PER_S     1000
+#define S_PER_HOUR   3600
+#define S_PER_MIN    60
+#define M_PER_HOUR   60
+#define H_PER_DAY    24
+
+#define MS_PER_DAY   ((H_PER_DAY) * (S_PER_HOUR) * (MS_PER_S))
 // -----------------------------------------------------------------------------
 
 
@@ -163,8 +226,14 @@
 #define SYNC_WORD_POS  0
 #define MASK_POS       SYNC_WORD_POS + SYNC_WORD_BYTES
 
-#define MASK_ALARM_BIT (1 << 0)
-#define RETX_ALARM_BIT (1 << 1)
+// MASK BIT-FIELD
+#define ALARM_BIT_POS   0
+#define ACK_BIT_POS     1
+#define RETX_BIT_POS    2
+
+#define MASK_ALARM_BIT  (1 << ALARM_BIT_POS)
+#define MASK_ALARM_ACK  (1 << ACK_BIT_POS)
+#define MASK_RETX_BIT   (1 << RETX_BIT_POS)
 
 #define NODE_ID_POS    MASK_POS + MASK_BYTES
 
@@ -199,6 +268,18 @@
  * - SENSOR_PLD_BYTES bytes for sensors
  */
 #define ENV_NODE_PYL_SIZE SYNC_WORD_BYTES + MASK_BYTES + NODE_ID_BYTES + PKT_ID_BYTES + SENSOR_PLD_BYTES
+
+/*
+ * Minimum payload size receiving from BC-node
+ * - 2 bytes for sync word
+ * - 1 byte for masks
+ * - 1 byte node ID
+ * - 2 bytes pktID
+ * - SENSOR_PLD_BYTES bytes for sensors
+ * - 2 bytes for RSSI
+ * - at least one byte for bcID
+ */
+#define BC_NODE_MIN_PYL_SIZE SYNC_WORD_BYTES + MASK_BYTES + NODE_ID_BYTES + PKT_ID_BYTES + SENSOR_PLD_BYTES + RSSI_BYTES + BC_ID_BYTES
 
 // -----------------------------------------------------------------------------
 
