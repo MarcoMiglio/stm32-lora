@@ -157,17 +157,43 @@ test_buff e1_p1_bc31  = {0};
 test_buff e1_p2_bc22  = {0};
 test_buff e1_p2_bc43  = {0};
 
+test_buff e1_p1_bc22_a  = {0};
+test_buff e1_p1_bc54_a  = {0};
+test_buff e1_p1_bc51_a  = {0};
+test_buff e1_p1_bc543_a = {0};
+
+test_buff e1_p1_bc43_A  = {0};
+test_buff e1_p1_bc543_A = {0};
+
 // ----> ENV NODE 2 (define here PKTs from operator 2)
 test_buff e2_p1_bc51  = {0};
+
+test_buff e2_p1_bc64_a  = {0};
 
 // ----> ENV NODE 3 (define here PKTs from operator 3)
 test_buff e3_p1_bc53  = {0};
 test_buff e3_p1_bc64  = {0};
 
+test_buff e3_p1_bc64_a  = {0};
 
 // ----> GENERAL BUFF (This one defines the test TX sequence)
 test_buff* test_buffs[] = {
 		&e1_p1_bc543,
+		&e1_p1_bc43_A,
+		&e1_p1_bc54_a,
+		&e1_p1_bc51_a,
+		&e1_p1_bc543_A,
+
+		&e1_p1_bc543_a,
+		&e1_p1_bc22_a,
+		&e2_p1_bc64_a,
+		&e3_p1_bc64_a,
+		&e1_p1_bc51_a,
+		&e1_p1_bc543_a,
+		&e1_p1_bc543_a,
+		&e1_p1_bc543_a,
+		&e1_p1_bc543_a,
+
 		&e1_p1_bc51,
 		&e1_p1_bc54,
 		&e1_p2_bc43,
@@ -252,11 +278,52 @@ int main(void)
 	build_pkt(SYNC_WORD_BC, 0, 1, 2, pyl3, pyl3_len, -78, bc_seq, 2, e1_p2_bc43.buff, &e1_p2_bc43.len);
 
 
+	// ALARM PKTs for ENV1
+	uint8_t mask;
+
+	mask = (1 << ALARM_BIT_POS) | (0 << ACK_BIT_POS) | (0 << RETX_BIT_POS);
+	build_pkt(SYNC_WORD_ENV, mask, 1, 1, pyl1, pyl1_len, -50, bc_seq, 0, e1_p1_bc22_a.buff, &e1_p1_bc22_a.len);
+
+	bc_seq[0] = 5;
+	bc_seq[1] = 4;
+	mask = (1 << ALARM_BIT_POS) | (0 << ACK_BIT_POS) | (0 << RETX_BIT_POS);
+	build_pkt(SYNC_WORD_BC, mask, 1, 1, pyl1, pyl1_len, -89, bc_seq, 2, e1_p1_bc54_a.buff, &e1_p1_bc54_a.len);
+
+	bc_seq[0] = 5;
+	bc_seq[1] = 4;
+	bc_seq[3] = 1;
+	mask = (1 << ALARM_BIT_POS) | (0 << ACK_BIT_POS) | (0 << RETX_BIT_POS);
+	build_pkt(SYNC_WORD_BC, mask, 1, 1, pyl1, pyl1_len, -89, bc_seq, 3, e1_p1_bc51_a.buff, &e1_p1_bc51_a.len);
+
+	bc_seq[0] = 5;
+	bc_seq[1] = 4;
+	bc_seq[2] = 3;
+	mask = (1 << ALARM_BIT_POS) | (0 << ACK_BIT_POS) | (0 << RETX_BIT_POS);
+	build_pkt(SYNC_WORD_BC, mask, 1, 1, pyl1, pyl1_len, -92, bc_seq, 3, e1_p1_bc543_a.buff, &e1_p1_bc543_a.len);
+
+	bc_seq[0] = 4;
+	bc_seq[1] = 3;
+	mask = (1 << ALARM_BIT_POS) | (1 << ACK_BIT_POS) | (0 << RETX_BIT_POS);
+	build_pkt(SYNC_WORD_BC, mask, 1, 1, pyl1, pyl1_len, -92, bc_seq, 2, e1_p1_bc43_A.buff, &e1_p1_bc43_A.len);
+
+	bc_seq[0] = 5;
+	bc_seq[1] = 4;
+	bc_seq[2] = 3;
+	mask = (1 << ALARM_BIT_POS) | (1 << ACK_BIT_POS) | (0 << RETX_BIT_POS);
+	build_pkt(SYNC_WORD_BC, mask, 1, 1, pyl1, pyl1_len, -92, bc_seq, 3, e1_p1_bc543_A.buff, &e1_p1_bc543_A.len);
+
 	// ----> ENV NODE 2
 	bc_seq[0] = 5;
 	bc_seq[1] = 3;
 	bc_seq[2] = 1;
 	build_pkt(SYNC_WORD_BC, 0, 2, 1, pyl2, pyl2_len,  -80, bc_seq, 3, e2_p1_bc51.buff, &e2_p1_bc51.len);
+
+
+	// ALARM PKTs for ENV2
+	bc_seq[0] = 6;
+	bc_seq[1] = 4;
+	mask = (1 << ALARM_BIT_POS) | (0 << ACK_BIT_POS) | (0 << RETX_BIT_POS);
+	build_pkt(SYNC_WORD_BC, mask, 2, 1, pyl3, pyl3_len, -42, bc_seq, 2, e2_p1_bc64_a.buff, &e2_p1_bc64_a.len);
 
 
 	// ----> ENV NODE 3
@@ -269,6 +336,14 @@ int main(void)
 	bc_seq[1] = 5;
 	bc_seq[2] = 4;
 	build_pkt(SYNC_WORD_BC, 0, 3, 1, pyl3, pyl3_len, -101, bc_seq, 3, e3_p1_bc64.buff, &e3_p1_bc64.len);
+
+
+	// ALARM PKTs for ENV3
+	bc_seq[0] = 6;
+	bc_seq[1] = 5;
+	bc_seq[2] = 4;
+	mask = (1 << ALARM_BIT_POS) | (0 << ACK_BIT_POS) | (0 << RETX_BIT_POS);
+	build_pkt(SYNC_WORD_BC, mask, 3, 1, pyl3, pyl3_len, -101, bc_seq, 3, e3_p1_bc64_a.buff, &e3_p1_bc64_a.len);
 
 
   /* USER CODE END 1 */
@@ -325,7 +400,16 @@ int main(void)
   		uint8_t  c_bc1 = test_buffs[tx_seq_idx]->buff[BC_ID1_POS];
   		uint8_t  c_bcL = test_buffs[tx_seq_idx]->buff[c_len-1];
 
-  		printf("\n###### TX PKT E%d-P%d-%d%d\r\n",c_node,c_pkt,c_bc1,c_bcL);
+  		uint8_t c_alrm     = test_buffs[tx_seq_idx]->buff[MASK_POS] & MASK_ALARM_BIT;
+  		uint8_t c_alrm_ack = test_buffs[tx_seq_idx]->buff[MASK_POS] & MASK_ALARM_ACK;
+
+  		if (c_alrm_ack){
+  			printf("\n###### ALARM ACK PKT E%d-P%d-%d%d\r\n",c_node,c_pkt,c_bc1,c_bcL);
+  		} else if (c_alrm) {
+  			printf("\n###### ALARM PKT E%d-P%d-%d%d\r\n",c_node,c_pkt,c_bc1,c_bcL);
+  		} else {
+  			printf("\n###### TX PKT E%d-P%d-%d%d\r\n",c_node,c_pkt,c_bc1,c_bcL);
+  		}
 
   		/* Prepare TX buff here */
 
@@ -388,6 +472,8 @@ int main(void)
 						 printf("\n###### RX PKT ######\r\n");
 						 printf("       SYNC: 0x%04X\r\n", sync);
 						 printf("        MSK: %d\r\n", masks);
+						 printf("          - alarm: %d\r\n", (masks&MASK_ALARM_BIT) >> ALARM_BIT_POS);
+						 printf("          -   ack: %d\r\n", (masks&MASK_ALARM_ACK) >> ACK_BIT_POS);
 						 printf("    NODE ID: %d\r\n", node_id);
 						 printf("     PKT ID: %d\r\n", pkt_id);
 						 printf("       RSSI: %i\r\n", rssi);
