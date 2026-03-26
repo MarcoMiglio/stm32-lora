@@ -3848,10 +3848,10 @@ void rfm95_after_interrupts_configured(){
  8001a6a:	bd80      	pop	{r7, pc}
 
 08001a6c <onRxEvt>:
-}
-
-/*
- * TODO
+ * @param bc_pkt *rx_pkt pointer to structure holding all the informations for PKTs travelling
+ *                       in the BCs sequence.
+ *
+ * @return event_flags falgs for RX events (see app_events.h in other files...)
  */
 events_flags onRxEvt(rfm95_handle_t *h_rfm, bc_pkt *rx_pkt) {
  8001a6c:	b580      	push	{r7, lr}
@@ -4120,9 +4120,10 @@ events_flags onRxEvt(rfm95_handle_t *h_rfm, bc_pkt *rx_pkt) {
  8001bf8:	2000027d 	.word	0x2000027d
 
 08001bfc <onTxEvt>:
-
-/*
- * TODO
+ * its own informations (i.e. BC_ID = 0).
+ *
+ * Indeed, other nodes in the sequence will treat the head BC-ID PKT as an ACK.
+ * (Node with higher priority in teh sequence has received the intended pkt).
  */
 events_flags onTxEvt(rfm95_handle_t *h_rfm, bc_pkt *tx_pkt){
  8001bfc:	b580      	push	{r7, lr}
