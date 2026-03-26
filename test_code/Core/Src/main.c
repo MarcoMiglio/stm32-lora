@@ -159,6 +159,8 @@ test_buff e1_p2_bc43  = {0};
 
 test_buff e1_p1_bc22_a  = {0};
 test_buff e1_p1_bc54_a  = {0};
+test_buff e1_p2_bc54_a  = {0};
+test_buff e1_p2_bc51_a  = {0};
 test_buff e1_p1_bc51_a  = {0};
 test_buff e1_p1_bc543_a = {0};
 
@@ -179,20 +181,32 @@ test_buff e3_p1_bc64_a  = {0};
 // ----> GENERAL BUFF (This one defines the test TX sequence)
 test_buff* test_buffs[] = {
 		&e1_p1_bc543,
-		&e1_p1_bc43_A,
 		&e1_p1_bc54_a,
+		&e1_p2_bc54_a,
+		&e1_p2_bc51_a,
+
+    &e1_p1_bc43_A,
+    &e1_p1_bc543_A,
+    &e1_p1_bc22_a,
+    &e1_p1_bc543_a,
+
 		&e1_p1_bc51_a,
 		&e1_p1_bc543_A,
+    &e1_p1_bc51,
+    &e1_p1_bc54,
 
-		&e1_p1_bc543_a,
-		&e1_p1_bc22_a,
-		&e2_p1_bc64_a,
-		&e3_p1_bc64_a,
-		&e1_p1_bc51_a,
-		&e1_p1_bc543_a,
-		&e1_p1_bc543_a,
-		&e1_p1_bc543_a,
-		&e1_p1_bc543_a,
+//		&e1_p1_bc43_A,
+//		&e1_p1_bc543_A,
+
+//		&e1_p1_bc543_a,
+//		&e1_p1_bc22_a,
+//		&e2_p1_bc64_a,
+//		&e3_p1_bc64_a,
+//		&e1_p1_bc51_a,
+//		&e1_p1_bc543_a,
+//		&e1_p1_bc543_a,
+//		&e1_p1_bc543_a,
+//		&e1_p1_bc543_a,
 
 		&e1_p1_bc51,
 		&e1_p1_bc54,
@@ -311,6 +325,21 @@ int main(void)
 	bc_seq[2] = 3;
 	mask = (1 << ALARM_BIT_POS) | (1 << ACK_BIT_POS) | (0 << RETX_BIT_POS);
 	build_pkt(SYNC_WORD_BC, mask, 1, 1, pyl1, pyl1_len, -92, bc_seq, 3, e1_p1_bc543_A.buff, &e1_p1_bc543_A.len);
+
+	bc_seq[0] = 5;
+  bc_seq[1] = 4;
+  mask = (1 << ALARM_BIT_POS) | (0 << ACK_BIT_POS) | (0 << RETX_BIT_POS);
+  build_pkt(SYNC_WORD_BC, mask, 1, 2, pyl1, pyl1_len, -102, bc_seq, 2, e1_p2_bc54_a.buff, &e1_p2_bc54_a.len);
+
+  bc_seq[0] = 5;
+  bc_seq[1] = 4;
+  bc_seq[2] = 3;
+  bc_seq[3] = 1;
+  mask = (1 << ALARM_BIT_POS) | (0 << ACK_BIT_POS) | (0 << RETX_BIT_POS);
+  build_pkt(SYNC_WORD_BC, mask, 1, 2, pyl1, pyl1_len, -122, bc_seq, 4, e1_p2_bc51_a.buff, &e1_p2_bc51_a.len);
+
+
+
 
 	// ----> ENV NODE 2
 	bc_seq[0] = 5;
