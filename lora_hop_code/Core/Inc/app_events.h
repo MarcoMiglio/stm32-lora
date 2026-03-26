@@ -30,6 +30,8 @@ typedef struct {
 #define EVT_SCHEDULE_TX      (1 << 1)
 #define EVT_RFM_MODEM_RX     (1 << 2)
 #define EVT_TX_FIFO_EMPTY    (1 << 3)
+#define EVT_ALARM_PKT        (1 << 4)
+#define EVT_SCHEDULE_ACK     (1 << 5)
 
 
 // --------------------------------------------------------------------------------------------------------
@@ -40,12 +42,6 @@ typedef struct {
 events_flags on_rx_event(rfm95_handle_t* h_rfm, h_rx_tx* h_fifo);
 
 events_flags on_tx_event(rfm95_handle_t* h_rfm, h_rx_tx* h_fifo);
-
-events_flags process_bcNode_up(h_rx_tx* h_fifo, bc_pkt* rx_pkt);
-
-events_flags process_envNode_up(h_rx_tx* h_fifo, bc_pkt* rx_pkt, int16_t rssi);
-
-events_flags process_bcNode_ack(h_rx_tx* h_fifo, bc_pkt* rx_pkt);
 
 // --------------------------------------------------------------------------------------------------------
 

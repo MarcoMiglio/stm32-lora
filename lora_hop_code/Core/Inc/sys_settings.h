@@ -89,7 +89,7 @@
 /*
  * TX limit for alarm PKTs
  */
-#define ALARM_MAX_TX_ATTEMPTS 50
+#define ALARM_MAX_TX_ATTEMPTS 10
 
 /*
  * Sync word used to drop undesired PKTs
@@ -145,13 +145,23 @@
  *
  * Set MIN = MAX = 0 to skip the random wait and schedule an immediate transmission.
  */
-#define MIN_WAIT_ALRM_RETX 200u   // In milliseconds
-#define MAX_WAIT_ALRM_RETX 1000u  // In milliseconds
+#define MIN_WAIT_ALRM_RETX 2000u   // In milliseconds
+#define MAX_WAIT_ALRM_RETX 5000u  // In milliseconds
 
 /*
- * TODO
+ * ALARM timeout CYCLES defines how many RTC wkup cycles (each lasts
+ * ALARM_TIMEOUT_MS ms) the system has to wait in ALARM STDBY MODE before clearing
+ * the buffer and returning to normal operating mode.
+ *
+ * This represents how much time the system has to wait without receiving
+ * any ALARM event before clearing ALARM RX FIFO, and return to normal conditions.
+ *
+ * Total time (ms) = TIMEOUT_CYCLES * 30000ms
+ *
+ * (programmable in steps of 30 s)
  */
-#define ALARM_TIMEOUT_MS 10 * 1000 // In ms
+#define ALARM_TIMEOUT_CYCLES  2
+#define ALARM_TIMEOUT_MS      30 * 1000 // In ms (do not modify!)
 
 // -----------------------------------------------------------------------------
 

@@ -51,8 +51,9 @@ rnode h_rx[BUFF_FIFO_SIZE];
 
 // setup handler to manage RX - TX events
 h_rx_tx h_buffs = {
-    .h_rx = &h_rx[0],
-    .h_tx = &h_tx
+    .h_rx  = &h_rx[0],
+    .h_tx  = &h_tx,
+    .state = FIFO_READY
 };
 
 // system handler
@@ -82,26 +83,30 @@ RTC_HandleTypeDef hrtc;
 
 SPI_HandleTypeDef hspi3;
 
-UART_HandleTypeDef huart2;
+UART_HandleTypeDef huart1;
 
 /* USER CODE BEGIN PV */
 // ------------- LPTIM ----------------
-volatile uint32_t lptim_tick_msb = 0;
-uint32_t tx_evt_time = 0;
+volatile uint32_t lptim_tick_msb = 1;
 
 // ----------- RX-TX FIFO -------------
 events_flags app_flags = {0};           // handle status flags from RX TX buffers operation
+
+uint32_t tx_evt_time  = 0; // TX scheduler timer
+uint32_t alrm_th_time = 0; // Track threshold time in ms to shunt off ALRM state
+
+volatile uint8_t alrm_cycles_cnt = 0; // track how many alarm standby cycles have passed
 
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
-static void MX_USART2_UART_Init(void);
 static void MX_RTC_Init(void);
 static void MX_SPI3_Init(void);
 static void MX_LPTIM1_Init(void);
 static void MX_RNG_Init(void);
+static void MX_USART1_UART_Init(void);
 /* USER CODE BEGIN PFP */
 int _write(int file, char *ptr, int len);
 void debug_pin_set();
@@ -116,6 +121,10 @@ static void     rfm95_after_interrupts_configured();
 uint8_t get_random_number(uint32_t *random_number, uint16_t timeout);
 static uint16_t random_wait(uint16_t min, uint16_t max);
 static void schedule_tx_evt(uint16_t min, uint16_t max);
+static void schedule_alrmOFF_evt();
+static inline void extend_alarm_time();
+static uint32_t get_currTime_ms();
+static inline int julian_day(int year, int month, int day);
 
 void MySystemClock_Config(void);
 void enterStopMode();
@@ -157,11 +166,11 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
-  MX_USART2_UART_Init();
   MX_RTC_Init();
   MX_SPI3_Init();
   MX_LPTIM1_Init();
   MX_RNG_Init();
+  MX_USART1_UART_Init();
   /* USER CODE BEGIN 2 */
 
   // needed after programming -> avoid conflicts with sleep mode
@@ -230,7 +239,7 @@ int main(void)
 
       case SYS_HANDLE_RX:        /* Sys handle RX event */
 
-        printf("handle RX\r\n");
+//        printf("\nhandle RX\r\n");
 
         debug_pin_set();
         app_flags = on_rx_event(&rfm95_handle, &h_buffs);
@@ -238,38 +247,48 @@ int main(void)
 
         if (app_flags.err_flags) {           /* If any error occurred */
 
-          if (app_flags.err_flags & EVT_RFM_SPI_ERR) {
+          bool spi_err      = app_flags.err_flags & EVT_RFM_SPI_ERR;
+          bool rx_err       = app_flags.err_flags & EVT_RFM_RX_ERR;
+          bool rx_buff_full = app_flags.err_flags & EVT_RX_FIFO_FULL;
+          bool bad_pkt_err  = app_flags.err_flags & EVT_BAD_PKT_FORMAT;
+
+          if (spi_err) {
             printf("SPI ERROR\r\n");
 
             // reset RFM and restart in RX mode
+            HAL_NVIC_DisableIRQ(EXTI15_10_IRQn);
             reset_rfm(&rfm95_handle);
             init_rfm();
           }
-          if (app_flags.err_flags & EVT_RFM_RX_ERR) {
-
-            /*
-             * RX error can happen if:
-             * - CRC error is detected -> error on modulation
-             * - No bytes received due to interferance
-             */
-
+          if (rx_err) {
             // PKT dropped, do nothing...
-
           }
-          if (app_flags.err_flags & EVT_RX_FIFO_FULL) {
-            // TODO
+          if (rx_buff_full) {
+            // Avoid (resize FIFO Buff capacity)
             printf("RX FIFO Full\r\n");
           }
-          if (app_flags.err_flags & EVT_BAD_PKT_FORMAT) {
-            // TODO
-            printf("BAD PKT Full\r\n");
+          if (bad_pkt_err) {
+            //  Pkt ignored...
+            printf("BAD PKT format\r\n");
           }
 
         } else if (app_flags.status_flags) {  /* If status flags are present */
 
-          // Process event flags here:
-          if (app_flags.status_flags & EVT_SCHEDULE_TX) {
+          bool alrm_pkt   = app_flags.status_flags & EVT_ALARM_PKT;
+          bool tx_new_pkt = app_flags.status_flags & EVT_SCHEDULE_TX;
+          bool tx_ack_pkt = app_flags.status_flags & EVT_SCHEDULE_ACK;
 
+          if (alrm_pkt){
+            if (h_buffs.state != FIFO_ALARM_ON){
+              if(tx_new_pkt || tx_ack_pkt) h_buffs.state = FIFO_ALARM_ON;
+              else {
+                h_buffs.state = FIFO_ALARM_STDBY;
+                schedule_alrmOFF_evt();
+              }
+            }
+          }
+
+          if (tx_new_pkt) {
             printf("NEW PKT\r\n");
             /*
              *  New PKT pushed in the RX FIFO:
@@ -277,6 +296,11 @@ int main(void)
              */
             schedule_tx_evt(MIN_WAIT_TIME_NEW, MAX_WAIT_TIME_NEW);
 
+          } else if (tx_ack_pkt){
+            printf("Schedule ACK\r\n");
+            schedule_tx_evt(MIN_WAIT_TIME_ALRM_ACK, MAX_WAIT_TIME_ALRM_ACK);
+          } else {
+            // RFU...
           }
 
         } else {                              /* No events pending */
@@ -289,7 +313,7 @@ int main(void)
 
       case SYS_HANLDE_TX:        /* Sys handle TX event */
 
-        printf("handle TX\r\n");
+        printf("\nhandle TX\r\n");
 
         HAL_RTCEx_DeactivateWakeUpTimer(&hrtc);
 
@@ -299,10 +323,13 @@ int main(void)
 
         if (app_flags.err_flags) {           /* If any error occurred */
 
-          if (app_flags.err_flags & EVT_RFM_SPI_ERR) {
+          bool spi_err = app_flags.err_flags & EVT_RFM_SPI_ERR;
+
+          if (spi_err) {
             printf("SPI ERROR\r\n");
 
             // reset RFM and restart in RX mode
+            HAL_NVIC_DisableIRQ(EXTI15_10_IRQn);
             reset_rfm(&rfm95_handle);
             init_rfm();
           }
@@ -310,29 +337,61 @@ int main(void)
 
         } else if (app_flags.status_flags) {  /* If status flags are present */
 
+          bool rfm_modem_busy = app_flags.status_flags & EVT_RFM_MODEM_RX;
+          bool tx_fifo_empty  = app_flags.status_flags & EVT_TX_FIFO_EMPTY;
+          bool tx_pri_evt     = app_flags.status_flags & EVT_SCHEDULE_PRI_TX;
+          bool tx_normal_evt  = app_flags.status_flags & EVT_SCHEDULE_TX;
+
           // Process event flags here:
-          if(app_flags.status_flags & EVT_RFM_MODEM_RX) {
+          if(rfm_modem_busy) {
 
             printf("Modem RX -> reschedule \r\n");
             //  RFM is receiving something wait for the end of RX event
             schedule_tx_evt(MIN_WAIT_TIME_SHORT, MAX_WAIT_TIME_SHORT);
 
-          } else if (app_flags.status_flags & EVT_TX_FIFO_EMPTY){
+          } else if (tx_fifo_empty){
 
             printf("NO TX Events\r\n");
-            // Do nothing...
 
-          } else if (app_flags.status_flags & EVT_SCHEDULE_PRI_TX){
+            if (h_buffs.state == FIFO_ALARM_ON){
+              /* No alarm events are pending in TX queue */
+              printf("ALARM standby\r\n");
+
+              /* Program end of ALARM mode */
+              h_buffs.state = FIFO_ALARM_STDBY;
+              schedule_alrmOFF_evt();
+
+            } else if (h_buffs.state == FIFO_ALARM_STDBY){
+              /*
+               * If after an hysteresis time the system ALARM queue
+               * is still empty -> EXIT ALARM MODE
+               */
+              h_buffs.state = FIFO_READY;
+              init_buffers(&h_buffs);
+
+              printf("Back to normal mode\r\n");
+
+            } else {
+              // Normal operating mode -> do nothing
+            }
+
+          } else if (tx_pri_evt){
 
             printf("PRI TX PKTs\r\n");
             // Other new PKTs are waiting for 1st TX
             schedule_tx_evt(MIN_WAIT_TIME_SHORT, MAX_WAIT_TIME_SHORT);
 
-          } else if (app_flags.status_flags & EVT_SCHEDULE_TX){
+          } else if (tx_normal_evt){
 
-            printf("Normal TX PKTs\r\n");
-            // Schedule event for PKT retransmission mechanism
-            schedule_tx_evt(MIN_WAIT_TIME_LONG, MAX_WAIT_TIME_LONG);
+            if (h_buffs.state == FIFO_READY) {
+              // Schedule event for PKT retransmission mechanism
+              printf("Normal TX PKTs\r\n");
+              schedule_tx_evt(MIN_WAIT_TIME_LONG, MAX_WAIT_TIME_LONG);
+            } else {
+              // Schedule event for ALARM PKT retransmission
+              printf("Alarm ReTX PKTs\r\n");
+              schedule_tx_evt(MIN_WAIT_ALRM_RETX, MAX_WAIT_ALRM_RETX);
+            }
 
           } else {
             // RFU...
@@ -547,6 +606,26 @@ static void MX_RTC_Init(void)
   }
   /* USER CODE BEGIN RTC_Init 2 */
 
+  // Init RTC with reference date
+  sTime.Hours = 0x0;
+  sTime.Minutes = 0x0;
+  sTime.Seconds = 0x0;
+  sTime.DayLightSaving = RTC_DAYLIGHTSAVING_NONE;
+  sTime.StoreOperation = RTC_STOREOPERATION_RESET;
+  if (HAL_RTC_SetTime(&hrtc, &sTime, RTC_FORMAT_BCD) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sDate.WeekDay = RTC_WEEKDAY_MONDAY;
+  sDate.Month = START_MONTH;
+  sDate.Date = START_DAY;
+  sDate.Year = START_YEAR;
+
+  if (HAL_RTC_SetDate(&hrtc, &sDate, RTC_FORMAT_BCD) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
   // make sure RTC wkup is not running:
   HAL_RTCEx_DeactivateWakeUpTimer(&hrtc);
 
@@ -600,37 +679,37 @@ static void MX_SPI3_Init(void)
 }
 
 /**
-  * @brief USART2 Initialization Function
+  * @brief USART1 Initialization Function
   * @param None
   * @retval None
   */
-static void MX_USART2_UART_Init(void)
+static void MX_USART1_UART_Init(void)
 {
 
-  /* USER CODE BEGIN USART2_Init 0 */
+  /* USER CODE BEGIN USART1_Init 0 */
 
-  /* USER CODE END USART2_Init 0 */
+  /* USER CODE END USART1_Init 0 */
 
-  /* USER CODE BEGIN USART2_Init 1 */
+  /* USER CODE BEGIN USART1_Init 1 */
 
-  /* USER CODE END USART2_Init 1 */
-  huart2.Instance = USART2;
-  huart2.Init.BaudRate = 115200;
-  huart2.Init.WordLength = UART_WORDLENGTH_8B;
-  huart2.Init.StopBits = UART_STOPBITS_1;
-  huart2.Init.Parity = UART_PARITY_NONE;
-  huart2.Init.Mode = UART_MODE_TX_RX;
-  huart2.Init.HwFlowCtl = UART_HWCONTROL_NONE;
-  huart2.Init.OverSampling = UART_OVERSAMPLING_16;
-  huart2.Init.OneBitSampling = UART_ONE_BIT_SAMPLE_DISABLE;
-  huart2.AdvancedInit.AdvFeatureInit = UART_ADVFEATURE_NO_INIT;
-  if (HAL_UART_Init(&huart2) != HAL_OK)
+  /* USER CODE END USART1_Init 1 */
+  huart1.Instance = USART1;
+  huart1.Init.BaudRate = 115200;
+  huart1.Init.WordLength = UART_WORDLENGTH_8B;
+  huart1.Init.StopBits = UART_STOPBITS_1;
+  huart1.Init.Parity = UART_PARITY_NONE;
+  huart1.Init.Mode = UART_MODE_TX_RX;
+  huart1.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+  huart1.Init.OverSampling = UART_OVERSAMPLING_16;
+  huart1.Init.OneBitSampling = UART_ONE_BIT_SAMPLE_DISABLE;
+  huart1.AdvancedInit.AdvFeatureInit = UART_ADVFEATURE_NO_INIT;
+  if (HAL_UART_Init(&huart1) != HAL_OK)
   {
     Error_Handler();
   }
-  /* USER CODE BEGIN USART2_Init 2 */
+  /* USER CODE BEGIN USART1_Init 2 */
 
-  /* USER CODE END USART2_Init 2 */
+  /* USER CODE END USART1_Init 2 */
 
 }
 
@@ -654,9 +733,6 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOD_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_RESET);
-
-  /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(RFM95_RST_GPIO_Port, RFM95_RST_Pin, GPIO_PIN_SET);
 
   /*Configure GPIO pin Output Level */
@@ -665,45 +741,38 @@ static void MX_GPIO_Init(void)
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(Test_GPIO_Port, Test_Pin, GPIO_PIN_RESET);
 
-  /*Configure GPIO pin : B1_Pin */
-  GPIO_InitStruct.Pin = B1_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  HAL_GPIO_Init(B1_GPIO_Port, &GPIO_InitStruct);
-
-  /*Configure GPIO pins : PC0 PC1 PC2 PC3
-                           PC4 PC5 PC6 PC7
-                           PC8 PC9 */
-  GPIO_InitStruct.Pin = GPIO_PIN_0|GPIO_PIN_1|GPIO_PIN_2|GPIO_PIN_3
-                          |GPIO_PIN_4|GPIO_PIN_5|GPIO_PIN_6|GPIO_PIN_7
-                          |GPIO_PIN_8|GPIO_PIN_9;
+  /*Configure GPIO pins : PC13 PC0 PC1 PC2
+                           PC3 PC4 PC5 PC6
+                           PC7 PC8 PC9 */
+  GPIO_InitStruct.Pin = GPIO_PIN_13|GPIO_PIN_0|GPIO_PIN_1|GPIO_PIN_2
+                          |GPIO_PIN_3|GPIO_PIN_4|GPIO_PIN_5|GPIO_PIN_6
+                          |GPIO_PIN_7|GPIO_PIN_8|GPIO_PIN_9;
   GPIO_InitStruct.Mode = GPIO_MODE_ANALOG;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : PA0 PA1 PA4 PA6
-                           PA7 PA8 PA12 */
-  GPIO_InitStruct.Pin = GPIO_PIN_0|GPIO_PIN_1|GPIO_PIN_4|GPIO_PIN_6
-                          |GPIO_PIN_7|GPIO_PIN_8|GPIO_PIN_12;
+  /*Configure GPIO pins : PH0 PH1 */
+  GPIO_InitStruct.Pin = GPIO_PIN_0|GPIO_PIN_1;
+  GPIO_InitStruct.Mode = GPIO_MODE_ANALOG;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  HAL_GPIO_Init(GPIOH, &GPIO_InitStruct);
+
+  /*Configure GPIO pins : PA0 PA1 PA2 PA3
+                           PA4 PA5 PA6 PA7
+                           PA8 PA12 */
+  GPIO_InitStruct.Pin = GPIO_PIN_0|GPIO_PIN_1|GPIO_PIN_2|GPIO_PIN_3
+                          |GPIO_PIN_4|GPIO_PIN_5|GPIO_PIN_6|GPIO_PIN_7
+                          |GPIO_PIN_8|GPIO_PIN_12;
   GPIO_InitStruct.Mode = GPIO_MODE_ANALOG;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
-  /*Configure GPIO pin : LD2_Pin */
-  GPIO_InitStruct.Pin = LD2_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(LD2_GPIO_Port, &GPIO_InitStruct);
-
   /*Configure GPIO pins : PB0 PB1 PB2 PB10
                            PB11 PB12 PB13 PB14
-                           PB15 PB4 PB6 PB7
-                           PB8 PB9 */
+                           PB15 PB4 PB8 PB9 */
   GPIO_InitStruct.Pin = GPIO_PIN_0|GPIO_PIN_1|GPIO_PIN_2|GPIO_PIN_10
                           |GPIO_PIN_11|GPIO_PIN_12|GPIO_PIN_13|GPIO_PIN_14
-                          |GPIO_PIN_15|GPIO_PIN_4|GPIO_PIN_6|GPIO_PIN_7
-                          |GPIO_PIN_8|GPIO_PIN_9;
+                          |GPIO_PIN_15|GPIO_PIN_4|GPIO_PIN_8|GPIO_PIN_9;
   GPIO_InitStruct.Mode = GPIO_MODE_ANALOG;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
@@ -945,9 +1014,6 @@ static uint16_t random_wait(uint16_t min, uint16_t max){
  * @return uint16_t in range [min, max]
  */
 static void schedule_tx_evt(uint16_t min, uint16_t max){
-  RTC_TimeTypeDef sTime;
-  RTC_DateTypeDef sDate;
-
   // get random time between [min, max] (in milliseconds)
   uint16_t t_rand = random_wait(min, max);
 
@@ -962,13 +1028,9 @@ static void schedule_tx_evt(uint16_t min, uint16_t max){
     return;
   }
 
-  HAL_RTC_GetTime(&hrtc, &sTime, RTC_FORMAT_BIN);
-  HAL_RTC_GetDate(&hrtc, &sDate, RTC_FORMAT_BIN);  // latch time
-
   // new EVT time in milliseconds
-  uint32_t now_seconds = sTime.Hours * 3600 + sTime.Minutes * 60 + sTime.Seconds;
-  uint16_t milliseconds = (uint16_t)(((sTime.SecondFraction - sTime.SubSeconds) * 1000U) / (sTime.SecondFraction + 1));
-  uint32_t new_evt_time = now_seconds*1000 + milliseconds + t_rand;
+  uint32_t curr_time_ms = get_currTime_ms();
+  uint32_t new_evt_time = curr_time_ms + t_rand;
 
   if (RTC->CR & RTC_CR_WUTE) { /* RTC WKUP already running */
 
@@ -982,12 +1044,92 @@ static void schedule_tx_evt(uint16_t min, uint16_t max){
 
   tx_evt_time = new_evt_time;
 
-  // compute corresponding RTC corresponding number of ticks
+  // compute corresponding RTC number of ticks
   uint32_t wakeUpCounter = (uint32_t) ((t_rand * LSE_CLK / 16u)/(1000u));
 
   HAL_RTCEx_SetWakeUpTimer_IT(&hrtc, wakeUpCounter, RTC_WAKEUPCLOCK_RTCCLK_DIV16);
 }
 
+/*
+ * TODO
+ */
+static void schedule_alrmOFF_evt(){
+  alrm_cycles_cnt = 0;
+
+  /* ensure RTC WKUP not running */
+  if (RTC->CR & RTC_CR_WUTE) HAL_RTCEx_DeactivateWakeUpTimer(&hrtc);
+
+  if (ALARM_TIMEOUT_MS < 20){
+    /*
+     * if less than 20 ms are computed, skip the timer
+     * and directly set a new event
+     */
+
+    h_sys.evt_flags |= SYS_EVT_TX_PENDING;
+    return;
+  }
+
+  // new EVT time in milliseconds
+  uint32_t curr_time_ms = get_currTime_ms();
+  uint32_t new_evt_time = curr_time_ms + ALARM_TIMEOUT_MS;
+
+  tx_evt_time = new_evt_time;
+
+  // compute corresponding RTC number of ticks
+  uint32_t wakeUpCounter = (uint32_t) ((ALARM_TIMEOUT_MS * LSE_CLK / 16u)/(1000u) - 1);
+
+  HAL_RTCEx_SetWakeUpTimer_IT(&hrtc, wakeUpCounter, RTC_WAKEUPCLOCK_RTCCLK_DIV16);
+}
+
+/*
+ * TODO
+ */
+static inline void extend_alarm_time(){
+  alrm_th_time = get_currTime_ms() + ALARM_TIMEOUT_MS;
+}
+
+/*
+ * TODO
+ */
+static inline int julian_day(int year, int month, int day){
+  if (month <= 2) {
+    year -= 1;
+    month += 12;
+  }
+  int A = year / 100;
+  int B = 2 - A + (A / 4);
+  int jd = (int)(365.25 * (year + 4716))
+         + (int)(30.6001 * (month + 1))
+         + day + B - 1524;
+  return jd;
+}
+
+/*
+ * TODO
+ */
+static uint32_t get_currTime_ms(){
+  RTC_TimeTypeDef sTime;
+  RTC_DateTypeDef sDate;
+
+  HAL_RTC_GetTime(&hrtc, &sTime, RTC_FORMAT_BIN);
+  HAL_RTC_GetDate(&hrtc, &sDate, RTC_FORMAT_BIN);  // latch time
+
+  // compute time elapsed in days
+  int ref_day = julian_day(START_YEAR_DEC, START_MONTH_DEC, START_DAY_DEC);
+  int today   = julian_day(sDate.Year, sDate.Month, sDate.Date);
+
+  uint32_t days_elapsed = today - ref_day;
+
+  uint32_t days_elapsed_ms = days_elapsed * MS_PER_DAY;
+
+  // read milliseconds register:
+  uint16_t milliseconds = (uint16_t)(((sTime.SecondFraction - sTime.SubSeconds) * 1000U) / (sTime.SecondFraction + 1));
+
+  // milliseconds elapsed since reference date:
+  uint32_t now_ms = days_elapsed_ms + ((sTime.Hours * S_PER_HOUR + sTime.Minutes * S_PER_MIN + sTime.Seconds)*MS_PER_S) + milliseconds;
+
+  return now_ms;
+}
 
 // --------------------------------------------------------------------------------------
 
@@ -1019,11 +1161,13 @@ void enterStopMode(){
 	if(READ_BIT(RCC->CR, RCC_CR_PLLRDY) == 0U) MySystemClock_Config();
 
 	// resume system tick with correct clock
+	__enable_irq();
 	HAL_ResumeTick();
 
 	// Enable LPTIM again:
 	HAL_LPTIM_Counter_Start_IT(&hlptim1, 0xFFFF);
 
+	//while(get_precision_tick() == 0);
 }
 
 
@@ -1105,7 +1249,8 @@ void HAL_LPTIM_CompareMatchCallback(LPTIM_HandleTypeDef *hlptim){
 
 // RTC wkup timer -> needed to schedule tx events
 void HAL_RTCEx_WakeUpTimerEventCallback(RTC_HandleTypeDef *hrtc){
-  h_sys.evt_flags |= SYS_EVT_TX_PENDING;
+  alrm_cycles_cnt+=1;
+  if (alrm_cycles_cnt >= ALARM_TIMEOUT_CYCLES) h_sys.evt_flags |= SYS_EVT_TX_PENDING;
 }
 
 // GPIO external interrupts callback
@@ -1164,7 +1309,7 @@ void print_LL(){
  * Function used to print on UART serial (DEBUG)
  */
 int _write(int file, char *ptr, int len) {
-  HAL_UART_Transmit(&huart2, (uint8_t *)ptr, len, HAL_MAX_DELAY);
+  HAL_UART_Transmit(&huart1, (uint8_t *)ptr, len, HAL_MAX_DELAY);
   return len;
 }
 

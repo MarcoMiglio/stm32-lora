@@ -9,6 +9,49 @@
 
 
 
+
+// ----------------------------------------------- STATIC FUNCTIONS ---------------------------------------------------------
+
+/*
+ *  This local IDX is used to scan the TX buffer from head->tail during ALARM events (needed to periodically retransmitt
+ *  ALARM PKTs and garantee an ACK for all of them)
+ */
+
+static uint16_t LL_scan_idx = 0;
+
+/*
+ * This internal function updates an index used to scan
+ * the TX Buffer (Linked List) sequentially from head -> tail.
+ * The LL_scan_idx can be used to schedule retransmission of ALARM events
+ * relying on the function "get_nextTX_pkt_alrm" with entry point TX_SEQ_SCAN.
+ *
+ * It automatically updates LL_scan_idx on remove operations to always point
+ * to a valid element in the TX buffer.
+ *
+ * @return: - LL_IDX_IS_EMPTY if the TX buff is empty
+ *          - 0 otherwise;
+ */
+static uint16_t update_TXscan_idx(LL_handler* h_ll){
+
+  LL_scan_idx = get_next_LL(h_ll, LL_scan_idx);
+  if (LL_scan_idx == LL_IDX_IS_EMPTY) {
+    LL_scan_idx = h_ll->ins_idx;
+    return LL_IDX_IS_EMPTY;
+  }
+
+  if (LL_scan_idx == LL_IDX_IS_TAIL){
+    LL_scan_idx = get_head_LL(h_ll);
+  }
+
+  return 0;
+}
+
+// -------------------------------------------- END OF STATIC FUNCTIONS ------------------------------------------------------
+
+
+
+// ------------------------------------------------ PUBLIC FUNCTIONS ---------------------------------------------------------
+
 /*
  * Initialize system buffers (both RX buffer which stores payloads, and TX buffer implemented as a linked list).
  *
@@ -25,6 +68,9 @@ void init_buffers(h_rx_tx* h_rx_tx){
 
   // init Linked List for TX sequence
   init_LL(h_rx_tx->h_tx);
+
+  // start scan from head (i.e. idx 0)
+  LL_scan_idx = h_rx_tx->h_tx->head;
 }
 
 /*
@@ -38,7 +84,7 @@ void init_buffers(h_rx_tx* h_rx_tx){
  * OBS: all these flags are for debug -> in any case tha pkt is not present or has been already removed.
  *
  * @return: - RX_BUFF_SLOT_EMPTY if the slot at buff[rm_idx] is already EMPTY;
- *          - LL_IDX_IS_EMPTY if the LL is empty (pkt already removed from the TX sequence);
+ *          - LL_BUFF_EMPTY if the LL is empty (pkt already removed from the TX sequence);
  *          - TX_IDX_EMPTY if this packet has no pointer to the TX sequence LL (pkt already removed from the TX sequence);
  *          - 0 otherwise;
  */
@@ -51,10 +97,14 @@ uint16_t remove_pkt(h_rx_tx* h_rx_tx, uint16_t rm_idx){
   // mark this slot as free
   h_rx_tx->h_rx[rm_idx].slot_free = true;
 
-  uint16_t ll_idx = h_rx_tx->h_rx[rm_idx].ll_idx;
-  if (ll_idx == TX_IDX_EMPTY) return TX_IDX_EMPTY;
+  // remove TX queue entry
+  return tx_queue_remove(h_rx_tx, rm_idx);
 
-  return remove_pkt_LL(h_rx_tx->h_tx, ll_idx);
+
+//  uint16_t ll_idx = h_rx_tx->h_rx[rm_idx].ll_idx;
+//  if (ll_idx == TX_IDX_EMPTY) return TX_IDX_EMPTY;
+//
+//  return remove_pkt_LL(h_rx_tx->h_tx, ll_idx);
 }
 
 /*
@@ -148,8 +198,9 @@ uint16_t get_nextTX_pkt(h_rx_tx* h_rx_tx, fifo_entry_point entry_point, uint8_t*
      */
     while (1) {
       // check if this PKT has already been TX
-      uint16_t rx_idx = LL_get_RXbuff_idx(h_rx_tx->h_tx, c_idx);
-      if(h_rx_tx->h_rx[rx_idx].pkt.tx_attempts > 0) break;
+      uint16_t rx_idx  = LL_get_RXbuff_idx(h_rx_tx->h_tx, c_idx);
+      uint16_t curr_tx = h_rx_tx->h_rx[rx_idx].pkt.tx_attempts;
+      if(curr_tx > 0) break;
       idx = rx_idx;
 
       // up to now all the pkts are "new" ones -> find the 1st one in the sequence
@@ -162,6 +213,87 @@ uint16_t get_nextTX_pkt(h_rx_tx* h_rx_tx, fifo_entry_point entry_point, uint8_t*
     // in the end -> if no "new" PKTs were present terminate here
     if (idx == RX_BUFF_IDX_NOT_DEFINED) return RX_BUFF_IDX_NOT_DEFINED;
 
+  } else {
+
+  }
+
+  *pyl_len = h_rx_tx->h_rx[idx].pkt.pl_len;
+
+  // Copy into caller's buffer
+  memcpy(pyl_buff, h_rx_tx->h_rx[idx].pkt.pl, *pyl_len);
+
+  return idx;
+}
+
+/*
+ * Get the next payload in the ALARM TX seqeunce.
+ * The TX queue can be accessed as a FIFO, as a LIFO, or with a linear scan from HEAD->TAIL
+ * by setting the corresponding field fifo_entry_point.
+ * -> When accessed as a FIFO the function returns the head of the TX sequence (LL buffer), i.e. the oldest PKT.
+ * -> When accessed as a LIFO, this function looks for the highet priority PKT: entering from the TAIL
+ *    searches for the first PKT either with 0 TX attempts (new PKT) or with ALRM_PKT_SINGLE_TX (i.e. this PKT
+ *    is an ACK response).
+ * -> When accessed with linear SCAN, it allows to scan through the entire TX BUFF from head to tail.
+ *    In ALARM mode this allows to periodically retransmitt all the ALARM message until an ACK is received for all of them.
+ *
+ * This function provides directly the BC payload (nodeID, pktID, ..., bcID sequence) of the
+ * oldest pkt. The corresponding index in the RX buffer is also provided.
+ *
+ * @param h_rx_tx*           h_rx_tx       buffer handler;
+ * @param fifo_entry_point   entry_point   TX_SEQ_ENTRY_TAIL to scan as a LIFO, TX_SEQ_ENTRY_HEAD to scan as a FIFO
+ * @param uint8_t*           pyl_buff       pointer to the data buffer in which the payload will be stored;
+ * @param uint16_t*          pyl_len        pointer to variable for storing actual BS-payload size (bytes);
+ *
+ * @return: - RX_BUFF_IDX_NOT_DEFINED set if while scanning from tail, no "new" or "ACK" PKTs were found
+ *          - LL_BUFF_EMPTY if the LL is empty (notice that an empty LL doesn't mean an empty RX FIFO,
+ *            maybe all the packets in the RX FIFO were already ACK);
+ *          - index in the main buffer on success;
+ */
+uint16_t get_nextTX_pkt_alrm(h_rx_tx* h_rx_tx, fifo_entry_point entry_point, uint8_t* pyl_buff, uint8_t* pyl_len){
+  uint16_t idx = RX_BUFF_IDX_NOT_DEFINED;
+
+  if (entry_point == TX_SEQ_ENTRY_HEAD){
+    // get index in the main buffer by quering the LL sequence
+    idx = get_head_LL(h_rx_tx->h_tx);
+
+    if (idx == LL_IDX_IS_EMPTY) return LL_BUFF_EMPTY;
+    idx = LL_get_RXbuff_idx(h_rx_tx->h_tx, idx);
+
+  } else if (entry_point == TX_SEQ_ENTRY_TAIL){
+
+    // get last inserted pkt in the LL (i.e. newest pkt)
+    uint16_t c_idx = get_tail_LL(h_rx_tx->h_tx);
+
+    if (c_idx == LL_IDX_IS_EMPTY) return LL_BUFF_EMPTY;
+
+    /*
+     *  scan LL (the TX buffer) looking for the 1st inserted
+     *  pkt that has not been TX yet
+     */
+    while (1) {
+      // check if this PKT has already been TX
+      uint16_t rx_idx  = LL_get_RXbuff_idx(h_rx_tx->h_tx, c_idx);
+      uint16_t curr_tx = h_rx_tx->h_rx[rx_idx].pkt.tx_attempts;
+      if((curr_tx != ALRM_PKT_SINGLE_TX) && (curr_tx > 0)) break;
+      idx = rx_idx;
+
+      // up to now all the pkts are "new" ones -> find the 1st one in the sequence
+      c_idx = get_prev_LL(h_rx_tx->h_tx, c_idx);
+
+      // no remaining elements -> break here
+      if (c_idx == LL_IDX_IS_HEAD) break;
+    }
+
+    // in the end -> if no "new" PKTs were present terminate here
+    if (idx == RX_BUFF_IDX_NOT_DEFINED) return RX_BUFF_IDX_NOT_DEFINED;
+
+  } else {
+    // scan TX queue from head->tail (used to guarantee ACK to all ALRM PKTs)
+    idx = LL_scan_idx;
+    uint16_t res = update_TXscan_idx(h_rx_tx->h_tx);
+
+    if (res == LL_IDX_IS_EMPTY) return LL_BUFF_EMPTY;
+    idx = LL_get_RXbuff_idx(h_rx_tx->h_tx, idx);
   }
 
   *pyl_len = h_rx_tx->h_rx[idx].pkt.pl_len;
@@ -223,6 +355,33 @@ uint16_t get_nextTX_pri(h_rx_tx* h_rx_tx){
 }
 
 /*
+ * Rely on this function to get priority status of the ALARM TX buffer.
+ * This helps scheduling new TX events based on the priority of remaining PKTs.
+ *
+ * @param h_rx_tx*  h_rx_tx   buffer handler;
+ *
+ * @return: - LL_BUFF_EMPTY  if the LL is empty (notice that an empty LL doesn't mean an empty RX FIFO)
+ *                           --> No ALARM Events are pending, controller can plan to return to normal operation
+ *          - TX_BUFF_PRI    If at either "new PKT" (waiting for 1st TX) or "ALARM ACK" are present in the TX FIFO
+ *          - TX_BUFF_NO_PRI If only retransmissions are pending (i.e. at least on TX was already done for all the PKTs)
+ */
+uint16_t get_nextAlrmTX_pri(h_rx_tx* h_rx_tx){
+  // get index in the main buffer by quering the LL sequence
+  uint16_t idx = get_tail_LL(h_rx_tx->h_tx);
+
+  if (idx == LL_IDX_IS_EMPTY) return LL_BUFF_EMPTY;
+
+  // at this point at least one element exist -> get payload in RX FIFO
+  uint16_t rx_idx = LL_get_RXbuff_idx(h_rx_tx->h_tx, idx);
+
+  uint8_t c_tx_attempts = h_rx_tx->h_rx[rx_idx].pkt.tx_attempts;
+
+  bool pri_mask = ((c_tx_attempts == 0) || (c_tx_attempts == ALRM_PKT_SINGLE_TX));
+
+  return (pri_mask == 1) ? TX_BUFF_PRI : TX_BUFF_NO_PRI;
+}
+
+/*
  * Rely on this function to remove a pkt from the TX sequence when receiving an ACK.
  * This function only removes the pkt from the linked list.
  * The LL automatically updates internal links to overcome the "gap" created by the removal.
@@ -238,6 +397,7 @@ uint16_t get_nextTX_pri(h_rx_tx* h_rx_tx){
  *          - 0 on success;
  */
 uint16_t tx_queue_remove(h_rx_tx* h_rx_tx, uint16_t rm_idx){
+  uint16_t res = 0; // for debugging
 
   // get idx of the associated slot in the LL sequence
   uint16_t ll_idx = h_rx_tx->h_rx[rm_idx].ll_idx;
@@ -250,6 +410,11 @@ uint16_t tx_queue_remove(h_rx_tx* h_rx_tx, uint16_t rm_idx){
 
   // At this point the reference in the TX sequence has been removed, clear the idx in the main buffer
   h_rx_tx->h_rx[rm_idx].ll_idx = TX_IDX_EMPTY;
+
+  // update scan IDX if it coincides with the ll_idx just removed
+  if (ll_idx == LL_scan_idx){
+    res = update_TXscan_idx(h_rx_tx->h_tx);
+  }
 
   return 0;
 }

@@ -31,6 +31,8 @@
 #define LL_BUFF_EMPTY            (BUFF_FIFO_SIZE + 14)   // LL buff is EMPTY (This doesn't mean that RX-BUFF is also EMPTY!)
 #define TX_BUFF_NO_PRI           (BUFF_FIFO_SIZE + 15)   // LL buff has no "new PKTs" -> only retransmissions
 #define TX_BUFF_PRI              (BUFF_FIFO_SIZE + 16)   // LL buff has at least one "new PKT" (waiting for 1st TX)
+
+#define ALRM_PKT_SINGLE_TX       (ALARM_MAX_TX_ATTEMPTS + 1) // dummy flag used to shcedule a single TX for alarm EVTs
 // --------------------------------------------------------------------------------------------------------
 
 
@@ -43,8 +45,18 @@
  */
 typedef enum{
   TX_SEQ_ENTRY_TAIL,
-  TX_SEQ_ENTRY_HEAD
+  TX_SEQ_ENTRY_HEAD,
+  TX_SEQ_SCAN
 } fifo_entry_point;
+
+/*
+ * TODO
+ */
+typedef enum{
+  FIFO_READY,
+  FIFO_ALARM_ON,
+  FIFO_ALARM_STDBY
+} fifo_buff_state;
 
 /*
  * Breadcrumb structure
@@ -56,7 +68,7 @@ typedef struct{
 
   uint8_t nodeID;       // Node ID for this packet
 
-  uint16_t pktID;        // pkt ID to identify this specific payload
+  uint16_t pktID;       // pkt ID to identify this specific payload
 
   uint8_t rx_bcID;      // ID of the breadcrumb that has received this packet from the environmental node
 
@@ -83,9 +95,11 @@ typedef struct{
  * it automatically handles add/remove operations as well as tracking of the packets transmission sequence.
  */
 typedef struct{
-  LL_handler* h_tx;  // Pointer to LL handler used to track packets transmission sequence
+  LL_handler* h_tx;        // Pointer to LL handler used to track packets transmission sequence
 
-  rnode* h_rx;       // Pointer to the buffer of BC packets -> i.e. the receieve buffer
+  rnode* h_rx;             // Pointer to the buffer of BC packets -> i.e. the receieve buffer
+
+  fifo_buff_state state; // set when alarm event is ongoing
 } h_rx_tx;
 
 // --------------------------------------------------------------------------------------------------------
@@ -101,9 +115,13 @@ uint16_t add_pkt(h_rx_tx* h_rx_tx, uint16_t add_idx, bc_pkt* bc);
 
 uint16_t get_nextTX_pkt(h_rx_tx* h_rx_tx, fifo_entry_point entry_point, uint8_t* pyl_buff, uint8_t* pyl_len);
 
+uint16_t get_nextTX_pkt_alrm(h_rx_tx* h_rx_tx, fifo_entry_point entry_point, uint8_t* pyl_buff, uint8_t* pyl_len);
+
 uint16_t get_lastTX_pkt(h_rx_tx* h_rx_tx, uint8_t* pyl_buff, uint16_t* pyl_len);
 
 uint16_t get_nextTX_pri(h_rx_tx* h_rx_tx);
+
+uint16_t get_nextAlrmTX_pri(h_rx_tx* h_rx_tx);
 
 uint16_t tx_queue_remove(h_rx_tx* h_rx_tx, uint16_t rm_idx);
 

@@ -1,5 +1,8 @@
-../Core/Src/app_events.c:39:14:on_rx_event	96	static
-../Core/Src/app_events.c:162:14:on_tx_event	88	static
-../Core/Src/app_events.c:291:14:process_bcNode_up	104	static
-../Core/Src/app_events.c:444:14:process_envNode_up	112	static
-../Core/Src/app_events.c:577:14:process_bcNode_ack	96	static
+../Core/Src/app_events.c:46:21:process_bcNode_up	104	static
+../Core/Src/app_events.c:202:21:process_bcNode_up_alarm	112	static
+../Core/Src/app_events.c:431:21:process_envNode_up	112	static
+../Core/Src/app_events.c:564:21:process_bcNode_ack	96	static
+../Core/Src/app_events.c:637:21:handle_PktTX	88	static
+../Core/Src/app_events.c:720:21:handle_AlarmTX	88	static
+../Core/Src/app_events.c:823:14:on_rx_event	112	static
+../Core/Src/app_events.c:986:14:on_tx_event	32	static
