@@ -190,6 +190,7 @@ int main(void)
         // Error occurred...
         bool spi_err = rx_flags.err_flags & EVT_RFM_SPI_ERR;
         bool rx_err  = rx_flags.err_flags & EVT_RFM_RX_ERR;
+        bool bad_pkt = rx_flags.err_flags & EVT_BAD_PKT_FORMAT;
 
         if (spi_err) {
           printf("SPI ERROR\r\n");
@@ -202,12 +203,17 @@ int main(void)
         if (rx_err) {
           // PKT dropped, do nothing...
         }
+        if (bad_pkt) {
+          printf("BAD PKT\r\n");
+        }
 
       } else {
         // Plot payload on serial:
         HAL_UART_Transmit_DMA(&huart1, rx_pkt.pl, rx_pkt.pl_len);
         dmaRunning = true;
+      }
 
+      if (rfm95_handle.rfm_status != RXCONTIN_MODE){
         // back in RX mode
         if (!tx_data) rfm95_enter_rx_mode(&rfm95_handle);
         else {
