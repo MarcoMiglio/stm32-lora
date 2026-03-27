@@ -180,7 +180,11 @@ int main(void)
   init_buffers(&h_buffs);
 
   // init RF in RX mode
-  if (!init_rfm()) printf("Error during RFM initialization\r\n");
+  if (!init_rfm()) {
+#if DEBUG_PRINT_ON
+    printf("Error during RFM initialization\r\n");
+#endif
+  }
 
   //h_sys.evt_flags |= SYS_EVT_RX_PENDING;
 
@@ -253,7 +257,9 @@ int main(void)
           bool bad_pkt_err  = app_flags.err_flags & EVT_BAD_PKT_FORMAT;
 
           if (spi_err) {
+#if DEBUG_PRINT_ON
             printf("SPI ERROR\r\n");
+#endif
 
             // reset RFM and restart in RX mode
             HAL_NVIC_DisableIRQ(EXTI15_10_IRQn);
@@ -265,11 +271,15 @@ int main(void)
           }
           if (rx_buff_full) {
             // Avoid (resize FIFO Buff capacity)
+#if DEBUG_PRINT_ON
             printf("RX FIFO Full\r\n");
+#endif
           }
           if (bad_pkt_err) {
             //  Pkt ignored...
+#if DEBUG_PRINT_ON
             printf("BAD PKT format\r\n");
+#endif
           }
 
         } else if (app_flags.status_flags) {  /* If status flags are present */
@@ -289,7 +299,9 @@ int main(void)
           }
 
           if (tx_new_pkt) {
+#if DEBUG_PRINT_ON
             printf("NEW PKT\r\n");
+#endif
             /*
              *  New PKT pushed in the RX FIFO:
              *  Schedule TX event, and TX
@@ -297,7 +309,9 @@ int main(void)
             schedule_tx_evt(MIN_WAIT_TIME_NEW, MAX_WAIT_TIME_NEW);
 
           } else if (tx_ack_pkt){
+#if DEBUG_PRINT_ON
             printf("Schedule ACK\r\n");
+#endif
             schedule_tx_evt(MIN_WAIT_TIME_ALRM_ACK, MAX_WAIT_TIME_ALRM_ACK);
           } else {
             // RFU...
@@ -313,7 +327,9 @@ int main(void)
 
       case SYS_HANLDE_TX:        /* Sys handle TX event */
 
+#if DEBUG_PRINT_ON
         printf("\nhandle TX\r\n");
+#endif
 
         HAL_RTCEx_DeactivateWakeUpTimer(&hrtc);
 
@@ -326,7 +342,9 @@ int main(void)
           bool spi_err = app_flags.err_flags & EVT_RFM_SPI_ERR;
 
           if (spi_err) {
+#if DEBUG_PRINT_ON
             printf("SPI ERROR\r\n");
+#endif
 
             // reset RFM and restart in RX mode
             HAL_NVIC_DisableIRQ(EXTI15_10_IRQn);
@@ -344,18 +362,22 @@ int main(void)
 
           // Process event flags here:
           if(rfm_modem_busy) {
-
+#if DEBUG_PRINT_ON
             printf("Modem RX -> reschedule \r\n");
+#endif
             //  RFM is receiving something wait for the end of RX event
             schedule_tx_evt(MIN_WAIT_TIME_SHORT, MAX_WAIT_TIME_SHORT);
 
           } else if (tx_fifo_empty){
-
+#if DEBUG_PRINT_ON
             printf("NO TX Events\r\n");
+#endif
 
             if (h_buffs.state == FIFO_ALARM_ON){
               /* No alarm events are pending in TX queue */
+#if DEBUG_PRINT_ON
               printf("ALARM standby\r\n");
+#endif
 
               /* Program end of ALARM mode */
               h_buffs.state = FIFO_ALARM_STDBY;
@@ -369,15 +391,18 @@ int main(void)
               h_buffs.state = FIFO_READY;
               init_buffers(&h_buffs);
 
+#if DEBUG_PRINT_ON
               printf("Back to normal mode\r\n");
+#endif
 
             } else {
               // Normal operating mode -> do nothing
             }
 
           } else if (tx_pri_evt){
-
+#if DEBUG_PRINT_ON
             printf("PRI TX PKTs\r\n");
+#endif
             // Other new PKTs are waiting for 1st TX
             schedule_tx_evt(MIN_WAIT_TIME_SHORT, MAX_WAIT_TIME_SHORT);
 
@@ -385,11 +410,15 @@ int main(void)
 
             if (h_buffs.state == FIFO_READY) {
               // Schedule event for PKT retransmission mechanism
+#if DEBUG_PRINT_ON
               printf("Normal TX PKTs\r\n");
+#endif
               schedule_tx_evt(MIN_WAIT_TIME_LONG, MAX_WAIT_TIME_LONG);
             } else {
               // Schedule event for ALARM PKT retransmission
+#if DEBUG_PRINT_ON
               printf("Alarm ReTX PKTs\r\n");
+#endif
               schedule_tx_evt(MIN_WAIT_ALRM_RETX, MAX_WAIT_ALRM_RETX);
             }
 

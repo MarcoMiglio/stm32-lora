@@ -65,6 +65,8 @@ typedef struct {
 #define EVT_RX_FIFO_FULL     (1 << 2)
 #define EVT_BAD_PKT_FORMAT   (1 << 3)
 
+#define DEBUG_PRINT_ON  1 // 1 = ON, 0 = OFF (printf not performed, but usart still active)
+
 /* USER CODE END EFP */
 
 /* Private defines -----------------------------------------------------------*/

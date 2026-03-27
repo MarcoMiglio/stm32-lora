@@ -164,7 +164,11 @@ int main(void)
   HAL_Delay(2000);
 
   // init RF in RX mode
-  if (!init_rfm()) printf("Error during RFM initialization\r\n");
+  if (!init_rfm()) {
+#if DEBUG_PRINT_ON
+    printf("Error during RFM initialization\r\n");
+#endif
+  }
 
   /* USER CODE END 2 */
 
@@ -193,7 +197,9 @@ int main(void)
         bool bad_pkt = rx_flags.err_flags & EVT_BAD_PKT_FORMAT;
 
         if (spi_err) {
+#if DEBUG_PRINT_ON
           printf("SPI ERROR\r\n");
+#endif
 
           // reset RFM and restart in RX mode
           HAL_NVIC_DisableIRQ(EXTI15_10_IRQn);
@@ -204,7 +210,9 @@ int main(void)
           // PKT dropped, do nothing...
         }
         if (bad_pkt) {
+#if DEBUG_PRINT_ON
           printf("BAD PKT\r\n");
+#endif
         }
 
       } else {
@@ -234,7 +242,9 @@ int main(void)
         bool spi_err = tx_err_flags.err_flags & EVT_RFM_SPI_ERR;
 
         if (spi_err) {
+#if DEBUG_PRINT_ON
           printf("SPI ERROR\r\n");
+#endif
 
           // reset RFM and restart in RX mode
           HAL_NVIC_DisableIRQ(EXTI15_10_IRQn);

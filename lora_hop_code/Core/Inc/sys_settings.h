@@ -10,6 +10,10 @@
 
 #include "main.h"
 
+// --------------------- DEBUG PRINTF ENABLE/DISABLE --------------------------
+
+#define DEBUG_PRINT_ON 0
+
 // -------------------------- LORA SETTINGS -----------------------------------
 
 /*
