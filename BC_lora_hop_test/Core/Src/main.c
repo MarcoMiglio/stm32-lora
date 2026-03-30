@@ -465,7 +465,7 @@ int main(void)
 			 /* read received data */
 			 if(!rfm95_receive(&rfm95_handle, &rx_buff[0], &rx_buff_len)) {
 
-				 printf("RX error");
+				 printf("RX error\r\n");
 				 // do domething...
 
 			 } else {
@@ -521,10 +521,10 @@ int main(void)
 
 				 }
 
-				 /* set RFM95 back to continuous RX mode */
-				 if(!rfm95_enter_rx_mode(&rfm95_handle)) printf("RFM err entering RX\r\n");
-
 			 }
+
+			 /* set RFM95 back to continuous RX mode */
+			 if(!rfm95_enter_rx_mode(&rfm95_handle)) printf("RFM err entering RX\r\n");
   	}
 
   } // End of While superloop

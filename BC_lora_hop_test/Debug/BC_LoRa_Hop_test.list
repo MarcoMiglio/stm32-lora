@@ -37,15 +37,15 @@ Idx Name          Size      VMA       LMA       File off  Algn
                   CONTENTS, READONLY, DEBUGGING, OCTETS
  16 .debug_macro  00004d68  00000000  00000000  00023deb  2**0
                   CONTENTS, READONLY, DEBUGGING, OCTETS
- 17 .debug_line   0001540f  00000000  00000000  00028b53  2**0
+ 17 .debug_line   00015411  00000000  00000000  00028b53  2**0
                   CONTENTS, READONLY, DEBUGGING, OCTETS
- 18 .debug_str    000f6dcf  00000000  00000000  0003df62  2**0
+ 18 .debug_str    000f6dcf  00000000  00000000  0003df64  2**0
                   CONTENTS, READONLY, DEBUGGING, OCTETS
- 19 .comment      00000043  00000000  00000000  00134d31  2**0
+ 19 .comment      00000043  00000000  00000000  00134d33  2**0
                   CONTENTS, READONLY
- 20 .debug_frame  000054e8  00000000  00000000  00134d74  2**2
+ 20 .debug_frame  000054e8  00000000  00000000  00134d78  2**2
                   CONTENTS, READONLY, DEBUGGING, OCTETS
- 21 .debug_line_str 00000079  00000000  00000000  0013a25c  2**0
+ 21 .debug_line_str 00000079  00000000  00000000  0013a260  2**0
                   CONTENTS, READONLY, DEBUGGING, OCTETS
 
 Disassembly of section .text:
@@ -3540,10 +3540,10 @@ int main(void)
  8001be0:	2b00      	cmp	r3, #0
  8001be2:	d003      	beq.n	8001bec <main+0x8f8>
 
-				 printf("RX error");
+				 printf("RX error\r\n");
  8001be4:	481e      	ldr	r0, [pc, #120]	@ (8001c60 <main+0x96c>)
- 8001be6:	f005 fc01 	bl	80073ec <iprintf>
- 8001bea:	e710      	b.n	8001a0e <main+0x71a>
+ 8001be6:	f005 fc69 	bl	80074bc <puts>
+ 8001bea:	e0f0      	b.n	8001dce <main+0xada>
 				 // do domething...
 
 			 } else {
@@ -3757,12 +3757,12 @@ int main(void)
 						 printf("\r\n");
  8001dc8:	4815      	ldr	r0, [pc, #84]	@ (8001e20 <main+0xb2c>)
  8001dca:	f005 fb77 	bl	80074bc <puts>
-					 }
-
 				 }
 
-				 /* set RFM95 back to continuous RX mode */
-				 if(!rfm95_enter_rx_mode(&rfm95_handle)) printf("RFM err entering RX\r\n");
+			 }
+
+			 /* set RFM95 back to continuous RX mode */
+			 if(!rfm95_enter_rx_mode(&rfm95_handle)) printf("RFM err entering RX\r\n");
  8001dce:	4815      	ldr	r0, [pc, #84]	@ (8001e24 <main+0xb30>)
  8001dd0:	f7ff f939 	bl	8001046 <rfm95_enter_rx_mode>
  8001dd4:	4603      	mov	r3, r0
