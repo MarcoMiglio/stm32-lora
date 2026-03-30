@@ -82,6 +82,9 @@ volatile uint32_t lptim_tick_msb = 1;
 bool rx_data;
 bool tx_data;
 
+uint8_t serBuff[255];
+uint8_t serBuff_len = 0;
+
 volatile bool dmaRunning = false;
 
 /* USER CODE END PV */
@@ -217,7 +220,7 @@ int main(void)
 
       } else {
         // Plot payload on serial:
-        HAL_UART_Transmit_DMA(&huart1, rx_pkt.pl, rx_pkt.pl_len);
+        HAL_UART_Transmit_DMA(&huart1, serBuff, serBuff_len);
         dmaRunning = true;
       }
 
@@ -952,6 +955,8 @@ events_flags onRxEvt(rfm95_handle_t *h_rfm, bc_pkt *rx_pkt) {
   if ((rx_pkt->pl_len == ENV_NODE_PYL_SIZE) && (rx_sync == SYNC_WORD_ENV)) {       /* receiving from an ENV NODE */
 
     // simply plot ENV node data, no TX needed...
+    memcpy(serBuff, rx_pkt->pl, rx_pkt->pl_len);
+    serBuff_len = rx_pkt->pl_len;
 
   } else if ((rx_pkt->pl_len > ENV_NODE_PYL_SIZE) && (rx_sync == SYNC_WORD_BC)) {  /* receiving fron BC NODE -> some hops happened */
 
@@ -959,6 +964,23 @@ events_flags onRxEvt(rfm95_handle_t *h_rfm, bc_pkt *rx_pkt) {
      * if receiving from bcNode, at leat one Hop happened
      * -> extarct 1st bc ID and last bc ID in the hopping sequence
      */
+
+    /* This lines are used only by the serial device to correctly recognize the sequence of bytes*/
+    uint8_t dummy_len = rx_pkt->pl_len;
+    uint8_t performed_hops = dummy_len - (uint8_t)(BC_ID1_POS);
+
+    // copy up to BCs sequence
+    memcpy(serBuff, rx_pkt->pl, BC_ID1_POS);
+    serBuff_len = BC_ID1_POS;
+
+    // add number of BCs
+    serBuff[serBuff_len++] = performed_hops;
+
+    // copy BCs sequence
+    memcpy(&serBuff[serBuff_len], &rx_pkt->pl[BC_ID1_POS], performed_hops);
+    serBuff_len+=performed_hops;
+
+
     rx_pkt->tx_bcID = rx_pkt->pl[rx_pkt->pl_len - 1];  // last RX byte corresponds to the BC_ID of the last BC in the hop-sequence
 
     // get the BC_ID of the 1st BC in the hop-sequence
