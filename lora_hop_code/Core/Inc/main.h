@@ -31,7 +31,7 @@ extern "C" {
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include "stdbool.h"
 /* USER CODE END Includes */
 
 /* Exported types ------------------------------------------------------------*/
@@ -50,6 +50,8 @@ typedef enum{
 
 /*
  * Possible pending events (set on interrupt events)
+ *
+ * TODO remove this
  */
 typedef enum {
   SYS_EVT_NO_PENDING    = (1 << 0),
@@ -63,7 +65,11 @@ typedef enum {
  * System handler -> manage status updates and possible events
  */
 typedef struct{
-  volatile Sys_event_flags evt_flags;
+  //volatile Sys_event_flags evt_flags;
+  volatile bool rx_pending;       // Set by EXTI DIO0
+	volatile bool tx_pending;       // Set by: RTC wake-up, schedule_tx_evt, schedule_alrmOFF_evt
+	volatile bool err_pending;      // RFU
+	volatile bool timeout_pending;  // RFU
   Sys_state state;
 } Sys_handler;
 

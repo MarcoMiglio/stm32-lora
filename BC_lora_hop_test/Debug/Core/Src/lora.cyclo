@@ -21,5 +21,5 @@
 ../Core/Src/lora.c:520:6:rfm95_stdby	3
 ../Core/Src/lora.c:541:6:rfm95_send	18
 ../Core/Src/lora.c:605:6:rfm95_enter_rx_mode	8
-../Core/Src/lora.c:642:6:rfm95_receive	12
+../Core/Src/lora.c:642:6:rfm95_receive	13
 ../Core/Src/lora.c:701:6:rfm95_on_interrupt	2

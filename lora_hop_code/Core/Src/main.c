@@ -58,7 +58,7 @@ h_rx_tx h_buffs = {
 
 // system handler
 Sys_handler h_sys = {
-    .evt_flags = SYS_EVT_NO_PENDING,
+    //.evt_flags = SYS_EVT_NO_PENDING,
     .state     = SYS_RDY
 };
 
@@ -208,27 +208,35 @@ int main(void)
         __disable_irq();
 
         /* check pending flags */
-        if (h_sys.evt_flags & SYS_EVT_RX_PENDING){         // RX event is pending
+        if (h_sys.rx_pending){         // RX event is pending
+        	//h_sys.evt_flags & SYS_EVT_RX_PENDING
 
           h_sys.state = SYS_HANDLE_RX;
-          h_sys.evt_flags &= ~SYS_EVT_RX_PENDING;
+          //h_sys.evt_flags &= ~SYS_EVT_RX_PENDING;
+          h_sys.rx_pending = 0;
 
-        } else if (h_sys.evt_flags & SYS_EVT_TX_PENDING){  // TX event is pending
+        } else if (h_sys.tx_pending){  // TX event is pending
+        	// h_sys.evt_flags & SYS_EVT_TX_PENDING
 
           h_sys.state = SYS_HANLDE_TX;
-          h_sys.evt_flags &= ~SYS_EVT_TX_PENDING;
+          //h_sys.evt_flags &= ~SYS_EVT_TX_PENDING;
+          h_sys.tx_pending = 0;
 
-        } else if (h_sys.evt_flags & SYS_EVT_ERROR){       // ERR event is pending
+        } else if (h_sys.err_pending){       // ERR event is pending
+        	//h_sys.evt_flags & SYS_EVT_ERROR
 
           // RFU...
           h_sys.state = SYS_HANDLE_ERR;
-          h_sys.evt_flags &= ~SYS_EVT_ERROR;
+          //h_sys.evt_flags &= ~SYS_EVT_ERROR;
+          h_sys.err_pending = 0;
 
-        } else if (h_sys.evt_flags & SYS_EVT_TIMEOUT){     // TIMEOUT event is pending
+        } else if (h_sys.timeout_pending){     // TIMEOUT event is pending
+        	// h_sys.evt_flags & SYS_EVT_TIMEOUT
 
           // RFU...
           h_sys.state = SYS_HANDLE_TIMEOUT;
-          h_sys.evt_flags &= ~SYS_EVT_TIMEOUT;
+          //h_sys.evt_flags &= ~SYS_EVT_TIMEOUT;
+          h_sys.timeout_pending = 0;
 
         } else {
           // No events pending -> back to sleep
@@ -350,6 +358,9 @@ int main(void)
             HAL_NVIC_DisableIRQ(EXTI15_10_IRQn);
             reset_rfm(&rfm95_handle);
             init_rfm();
+
+            // reschedule a TX in case of error, just to avoid stucking in the TX queue
+            schedule_tx_evt(MIN_WAIT_TIME_SHORT, MAX_WAIT_TIME_SHORT);
           }
           // RFU... add other flags
 
@@ -1053,7 +1064,8 @@ static void schedule_tx_evt(uint16_t min, uint16_t max){
      */
     HAL_RTCEx_DeactivateWakeUpTimer(&hrtc);
 
-    h_sys.evt_flags |= SYS_EVT_TX_PENDING;
+    //h_sys.evt_flags |= SYS_EVT_TX_PENDING;
+    h_sys.tx_pending = true;
     return;
   }
 
@@ -1094,7 +1106,8 @@ static void schedule_alrmOFF_evt(){
      * and directly set a new event
      */
 
-    h_sys.evt_flags |= SYS_EVT_TX_PENDING;
+    //h_sys.evt_flags |= SYS_EVT_TX_PENDING;
+    h_sys.tx_pending = true;
     return;
   }
 
@@ -1190,13 +1203,11 @@ void enterStopMode(){
 	if(READ_BIT(RCC->CR, RCC_CR_PLLRDY) == 0U) MySystemClock_Config();
 
 	// resume system tick with correct clock
-	__enable_irq();
-	HAL_ResumeTick();
+//	__enable_irq();
+//	HAL_ResumeTick();
 
 	// Enable LPTIM again:
 	HAL_LPTIM_Counter_Start_IT(&hlptim1, 0xFFFF);
-
-	//while(get_precision_tick() == 0);
 }
 
 
@@ -1238,7 +1249,7 @@ void MySystemClock_Config(void) {
   RCC_OscInitStruct.PLL.PLLM = 1;
   RCC_OscInitStruct.PLL.PLLN = 10;
   RCC_OscInitStruct.PLL.PLLP = RCC_PLLP_DIV7;
-  RCC_OscInitStruct.PLL.PLLQ = RCC_PLLQ_DIV2;
+  RCC_OscInitStruct.PLL.PLLQ = RCC_PLLQ_DIV8;
   RCC_OscInitStruct.PLL.PLLR = RCC_PLLR_DIV2;
   if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
   {
@@ -1278,8 +1289,17 @@ void HAL_LPTIM_CompareMatchCallback(LPTIM_HandleTypeDef *hlptim){
 
 // RTC wkup timer -> needed to schedule tx events
 void HAL_RTCEx_WakeUpTimerEventCallback(RTC_HandleTypeDef *hrtc){
-  alrm_cycles_cnt+=1;
-  if (alrm_cycles_cnt >= ALARM_TIMEOUT_CYCLES) h_sys.evt_flags |= SYS_EVT_TX_PENDING;
+
+	/* Start counter only if in FIFO standby mode (alarm standby) */
+	if (h_buffs.state == FIFO_ALARM_STDBY){
+		alrm_cycles_cnt+=1;
+		if (alrm_cycles_cnt < ALARM_TIMEOUT_CYCLES) {
+			//h_sys.evt_flags |= SYS_EVT_TX_PENDING;
+			return;
+		}
+	}
+
+  h_sys.tx_pending = true;
 }
 
 // GPIO external interrupts callback
@@ -1290,7 +1310,10 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin){
     rfm95_on_interrupt(&rfm95_handle, RFM95_INTERRUPT_DIO0);
 
     // something received
-    if(rfm95_handle.rfm_status == RXCONTIN_MODE) h_sys.evt_flags |= SYS_EVT_RX_PENDING;
+    if(rfm95_handle.rfm_status == RXCONTIN_MODE) {
+    	//h_sys.evt_flags |= SYS_EVT_RX_PENDING;
+    	h_sys.rx_pending = true;
+    }
 
   } else if (GPIO_Pin == RFM95_DIO1_Pin) {
     rfm95_on_interrupt(&rfm95_handle, RFM95_INTERRUPT_DIO1);

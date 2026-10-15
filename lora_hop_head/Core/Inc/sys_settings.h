@@ -276,8 +276,9 @@
  * - 1 byte node ID
  * - 2 bytes pktID
  * - SENSOR_PLD_BYTES bytes for sensors
+ * - 2 bytes RSSI
  */
-#define ENV_NODE_PYL_SIZE SYNC_WORD_BYTES + MASK_BYTES + NODE_ID_BYTES + PKT_ID_BYTES + SENSOR_PLD_BYTES
+#define ENV_NODE_PYL_SIZE SYNC_WORD_BYTES + MASK_BYTES + NODE_ID_BYTES + PKT_ID_BYTES  + SENSOR_PLD_BYTES
 
 /*
  * Minimum payload size receiving from BC-node

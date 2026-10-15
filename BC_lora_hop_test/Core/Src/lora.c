@@ -668,8 +668,8 @@ bool rfm95_receive(rfm95_handle_t *handle, uint8_t *rx_buff, uint8_t *rx_data_le
 
   // block here if no bytes were received
   if (rx_bytes == 0) {
-    write_register(handle, RFM95_REGISTER_OP_MODE, RFM95_OP_MODE_LORA_SLEEP);
-    return false;
+  	if (!write_register(handle, RFM95_REGISTER_OP_MODE, RFM95_OP_MODE_LORA_SLEEP)) return false;
+		handle->rfm_status = SLEEP_MODE;
   }
 
   // Read packet location within the FIFO buffer

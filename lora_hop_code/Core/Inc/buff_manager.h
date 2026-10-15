@@ -99,7 +99,7 @@ typedef struct{
 
   rnode* h_rx;             // Pointer to the buffer of BC packets -> i.e. the receieve buffer
 
-  fifo_buff_state state; // set when alarm event is ongoing
+  volatile fifo_buff_state state; // set when alarm event is ongoing
 } h_rx_tx;
 
 // --------------------------------------------------------------------------------------------------------

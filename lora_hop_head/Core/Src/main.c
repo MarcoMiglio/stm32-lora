@@ -72,15 +72,16 @@ RTC_HandleTypeDef hrtc;
 SPI_HandleTypeDef hspi3;
 
 UART_HandleTypeDef huart1;
-DMA_HandleTypeDef hdma_usart1_tx;
+UART_HandleTypeDef huart2;
+DMA_HandleTypeDef hdma_usart2_tx;
 
 /* USER CODE BEGIN PV */
 // ------------- LPTIM ----------------
 volatile uint32_t lptim_tick_msb = 1;
 
 // handle RX and TX events
-bool rx_data;
-bool tx_data;
+volatile bool rx_data;
+volatile bool tx_data;
 
 uint8_t serBuff[255];
 uint8_t serBuff_len = 0;
@@ -98,6 +99,7 @@ static void MX_SPI3_Init(void);
 static void MX_LPTIM1_Init(void);
 static void MX_RNG_Init(void);
 static void MX_USART1_UART_Init(void);
+static void MX_USART2_UART_Init(void);
 /* USER CODE BEGIN PFP */
 int _write(int file, char *ptr, int len);
 void debug_pin_set();
@@ -161,6 +163,7 @@ int main(void)
   MX_LPTIM1_Init();
   MX_RNG_Init();
   MX_USART1_UART_Init();
+  MX_USART2_UART_Init();
   /* USER CODE BEGIN 2 */
 
   // needed after programming -> avoid conflicts with sleep mode
@@ -220,8 +223,10 @@ int main(void)
 
       } else {
         // Plot payload on serial:
-        HAL_UART_Transmit_DMA(&huart1, serBuff, serBuff_len);
-        dmaRunning = true;
+      	if (dmaRunning == false){
+      		HAL_UART_Transmit_DMA(&huart2, serBuff, serBuff_len);
+					dmaRunning = true;
+      	}
       }
 
       if (rfm95_handle.rfm_status != RXCONTIN_MODE){
@@ -250,7 +255,7 @@ int main(void)
 #endif
 
           // reset RFM and restart in RX mode
-          HAL_NVIC_DisableIRQ(EXTI15_10_IRQn);
+					HAL_NVIC_DisableIRQ(EXTI15_10_IRQn);
           reset_rfm(&rfm95_handle);
           init_rfm();
         }
@@ -261,6 +266,33 @@ int main(void)
 
       tx_data = 0;  // clear TX flag
     }
+
+    /* Nothing left -> RFM must be in RX mode */
+    if (!rx_data && !tx_data && rfm95_handle.rfm_status != RXCONTIN_MODE) {
+    	// reset RFM and restart in RX mode
+			HAL_NVIC_DisableIRQ(EXTI15_10_IRQn);
+			reset_rfm(&rfm95_handle);
+			if (!init_rfm()) HAL_Delay(500);
+
+		} else { /* TRY TO SLEEP */
+
+			/* atomicity ensured during sleep entering */
+			HAL_SuspendTick();
+			__disable_irq();
+
+			if (!rx_data && ! tx_data && !dmaRunning){
+				enterStopMode();
+			}
+
+			/* end of atomic block */
+			HAL_ResumeTick();
+			__enable_irq();
+
+		}
+
+
+
+
 
   } // End of While superloop
   /* USER CODE END 3 */
@@ -549,6 +581,41 @@ static void MX_USART1_UART_Init(void)
 }
 
 /**
+  * @brief USART2 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_USART2_UART_Init(void)
+{
+
+  /* USER CODE BEGIN USART2_Init 0 */
+
+  /* USER CODE END USART2_Init 0 */
+
+  /* USER CODE BEGIN USART2_Init 1 */
+
+  /* USER CODE END USART2_Init 1 */
+  huart2.Instance = USART2;
+  huart2.Init.BaudRate = 115200;
+  huart2.Init.WordLength = UART_WORDLENGTH_8B;
+  huart2.Init.StopBits = UART_STOPBITS_1;
+  huart2.Init.Parity = UART_PARITY_NONE;
+  huart2.Init.Mode = UART_MODE_TX_RX;
+  huart2.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+  huart2.Init.OverSampling = UART_OVERSAMPLING_16;
+  huart2.Init.OneBitSampling = UART_ONE_BIT_SAMPLE_DISABLE;
+  huart2.AdvancedInit.AdvFeatureInit = UART_ADVFEATURE_NO_INIT;
+  if (HAL_UART_Init(&huart2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN USART2_Init 2 */
+
+  /* USER CODE END USART2_Init 2 */
+
+}
+
+/**
   * Enable DMA controller clock
   */
 static void MX_DMA_Init(void)
@@ -558,9 +625,9 @@ static void MX_DMA_Init(void)
   __HAL_RCC_DMA1_CLK_ENABLE();
 
   /* DMA interrupt init */
-  /* DMA1_Channel4_IRQn interrupt configuration */
-  HAL_NVIC_SetPriority(DMA1_Channel4_IRQn, 0, 0);
-  HAL_NVIC_EnableIRQ(DMA1_Channel4_IRQn);
+  /* DMA1_Channel7_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA1_Channel7_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(DMA1_Channel7_IRQn);
 
 }
 
@@ -608,12 +675,10 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(GPIOH, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : PA0 PA1 PA2 PA3
-                           PA4 PA5 PA6 PA7
-                           PA8 PA12 */
-  GPIO_InitStruct.Pin = GPIO_PIN_0|GPIO_PIN_1|GPIO_PIN_2|GPIO_PIN_3
-                          |GPIO_PIN_4|GPIO_PIN_5|GPIO_PIN_6|GPIO_PIN_7
-                          |GPIO_PIN_8|GPIO_PIN_12;
+  /*Configure GPIO pins : PA0 PA1 PA4 PA5
+                           PA6 PA7 PA8 PA12 */
+  GPIO_InitStruct.Pin = GPIO_PIN_0|GPIO_PIN_1|GPIO_PIN_4|GPIO_PIN_5
+                          |GPIO_PIN_6|GPIO_PIN_7|GPIO_PIN_8|GPIO_PIN_12;
   GPIO_InitStruct.Mode = GPIO_MODE_ANALOG;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
@@ -917,11 +982,15 @@ events_flags onRxEvt(rfm95_handle_t *h_rfm, bc_pkt *rx_pkt) {
   events_flags app_flags = {0};
   tx_data = false;
 
+  /* rx parameters */
+  int8_t snr;
+  int16_t rssi;
+
   /* set standby mode to read data from rfm95 */
   if(!rfm95_stdby(h_rfm)) app_flags.err_flags |= EVT_RFM_SPI_ERR;
 
   /* read received data */
-  if(!rfm95_receive(h_rfm, &rx_pkt->pl[0], &rx_pkt->pl_len))app_flags.err_flags |= EVT_RFM_RX_ERR;
+  if(!rfm95_receive(h_rfm, &rx_pkt->pl[0], &rx_pkt->pl_len, &snr, &rssi))app_flags.err_flags |= EVT_RFM_RX_ERR;
 
   /* If any error occurred, stop code here */
   if(app_flags.err_flags != 0) {
@@ -956,12 +1025,15 @@ events_flags onRxEvt(rfm95_handle_t *h_rfm, bc_pkt *rx_pkt) {
 
     // simply plot ENV node data, no TX needed...
     memcpy(serBuff, rx_pkt->pl, rx_pkt->pl_len);
-    serBuff_len = rx_pkt->pl_len;
+    serBuff[RSSI_POS] =   (rssi >> 8) & 0xFF;
+    serBuff[RSSI_POS+1] = (rssi >> 0) & 0xFF;
+
+    serBuff_len = rx_pkt->pl_len + RSSI_BYTES;
 
   } else if ((rx_pkt->pl_len > ENV_NODE_PYL_SIZE) && (rx_sync == SYNC_WORD_BC)) {  /* receiving fron BC NODE -> some hops happened */
 
     /*
-     * if receiving from bcNode, at leat one Hop happened
+     * if receiving from bcNode, at least one Hop happened
      * -> extarct 1st bc ID and last bc ID in the hopping sequence
      */
 
@@ -980,6 +1052,9 @@ events_flags onRxEvt(rfm95_handle_t *h_rfm, bc_pkt *rx_pkt) {
     memcpy(&serBuff[serBuff_len], &rx_pkt->pl[BC_ID1_POS], performed_hops);
     serBuff_len+=performed_hops;
 
+    // add RSSI between RX-node and last TX BC in the HOP sequence
+    serBuff[serBuff_len++] = (rssi >> 8) & 0xFF;
+		serBuff[serBuff_len++] = (rssi >> 0) & 0xFF;
 
     rx_pkt->tx_bcID = rx_pkt->pl[rx_pkt->pl_len - 1];  // last RX byte corresponds to the BC_ID of the last BC in the hop-sequence
 
@@ -1075,8 +1150,8 @@ void enterStopMode(){
 	if(READ_BIT(RCC->CR, RCC_CR_PLLRDY) == 0U) MySystemClock_Config();
 
 	// resume system tick with correct clock
-	__enable_irq();
-	HAL_ResumeTick();
+//	__enable_irq();
+//	HAL_ResumeTick();
 
 	// Enable LPTIM again:
 	HAL_LPTIM_Counter_Start_IT(&hlptim1, 0xFFFF);
@@ -1123,7 +1198,7 @@ void MySystemClock_Config(void) {
   RCC_OscInitStruct.PLL.PLLM = 1;
   RCC_OscInitStruct.PLL.PLLN = 10;
   RCC_OscInitStruct.PLL.PLLP = RCC_PLLP_DIV7;
-  RCC_OscInitStruct.PLL.PLLQ = RCC_PLLQ_DIV2;
+  RCC_OscInitStruct.PLL.PLLQ = RCC_PLLQ_DIV8;
   RCC_OscInitStruct.PLL.PLLR = RCC_PLLR_DIV2;
   if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
   {
@@ -1187,7 +1262,7 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin){
 // USART callback
 void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
 {
-  if (huart->Instance == USART1)
+  if (huart->Instance == USART2)
   {
     dmaRunning = false;
   }
@@ -1203,7 +1278,7 @@ void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
  * Function used to print on UART serial (DEBUG)
  */
 int _write(int file, char *ptr, int len) {
-  HAL_UART_Transmit(&huart1, (uint8_t *)ptr, len, HAL_MAX_DELAY);
+  HAL_UART_Transmit(&huart2, (uint8_t *)ptr, len, HAL_MAX_DELAY);
   return len;
 }
 

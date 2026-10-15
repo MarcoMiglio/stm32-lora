@@ -83,7 +83,7 @@
 /*
  * BC_ID for this NODE
  */
-#define MY_BC_ID 2
+#define MY_BC_ID 1
 
 /*
  * Number of retransmissions before dropping a packet

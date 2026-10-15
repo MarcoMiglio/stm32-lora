@@ -34,34 +34,34 @@ $(wildcard ../makefile.init) \
 $(wildcard ../makefile.targets) \
 
 
-BUILD_ARTIFACT_NAME := BC_LoRa_Hop_test
+BUILD_ARTIFACT_NAME := stm32L4_LoRa_Hop_test
 BUILD_ARTIFACT_EXTENSION := elf
 BUILD_ARTIFACT_PREFIX :=
 BUILD_ARTIFACT := $(BUILD_ARTIFACT_PREFIX)$(BUILD_ARTIFACT_NAME)$(if $(BUILD_ARTIFACT_EXTENSION),.$(BUILD_ARTIFACT_EXTENSION),)
 
 # Add inputs and outputs from these tool invocations to the build variables 
 EXECUTABLES += \
-BC_LoRa_Hop_test.elf \
+stm32L4_LoRa_Hop_test.elf \
 
 MAP_FILES += \
-BC_LoRa_Hop_test.map \
+stm32L4_LoRa_Hop_test.map \
 
 SIZE_OUTPUT += \
 default.size.stdout \
 
 OBJDUMP_LIST += \
-BC_LoRa_Hop_test.list \
+stm32L4_LoRa_Hop_test.list \
 
 
 # All Target
 all: main-build
 
 # Main-build Target
-main-build: BC_LoRa_Hop_test.elf secondary-outputs
+main-build: stm32L4_LoRa_Hop_test.elf secondary-outputs
 
 # Tool invocations
-BC_LoRa_Hop_test.elf BC_LoRa_Hop_test.map: $(OBJS) $(USER_OBJS) C:\Users\LabMeas\Desktop\MarcoMiglio\work_lora\stm32-lora\BC_lora_hop_test\STM32L476RGTX_FLASH.ld makefile objects.list $(OPTIONAL_TOOL_DEPS)
-	arm-none-eabi-gcc -o "BC_LoRa_Hop_test.elf" @"objects.list" $(USER_OBJS) $(LIBS) -mcpu=cortex-m4 -T"C:\Users\LabMeas\Desktop\MarcoMiglio\work_lora\stm32-lora\BC_lora_hop_test\STM32L476RGTX_FLASH.ld" --specs=nosys.specs -Wl,-Map="BC_LoRa_Hop_test.map" -Wl,--gc-sections -static --specs=nano.specs -mfpu=fpv4-sp-d16 -mfloat-abi=hard -mthumb -Wl,--start-group -lc -lm -Wl,--end-group
+stm32L4_LoRa_Hop_test.elf stm32L4_LoRa_Hop_test.map: $(OBJS) $(USER_OBJS) C:\Users\LabMeas\Desktop\MarcoMiglio\work_lora\stm32-lora\test_code\STM32L476RGTX_FLASH.ld makefile objects.list $(OPTIONAL_TOOL_DEPS)
+	arm-none-eabi-gcc -o "stm32L4_LoRa_Hop_test.elf" @"objects.list" $(USER_OBJS) $(LIBS) -mcpu=cortex-m4 -T"C:\Users\LabMeas\Desktop\MarcoMiglio\work_lora\stm32-lora\test_code\STM32L476RGTX_FLASH.ld" --specs=nosys.specs -Wl,-Map="stm32L4_LoRa_Hop_test.map" -Wl,--gc-sections -static --specs=nano.specs -mfpu=fpv4-sp-d16 -mfloat-abi=hard -mthumb -Wl,--start-group -lc -lm -Wl,--end-group
 	@echo 'Finished building target: $@'
 	@echo ' '
 
@@ -70,14 +70,14 @@ default.size.stdout: $(EXECUTABLES) makefile objects.list $(OPTIONAL_TOOL_DEPS)
 	@echo 'Finished building: $@'
 	@echo ' '
 
-BC_LoRa_Hop_test.list: $(EXECUTABLES) makefile objects.list $(OPTIONAL_TOOL_DEPS)
-	arm-none-eabi-objdump -h -S $(EXECUTABLES) > "BC_LoRa_Hop_test.list"
+stm32L4_LoRa_Hop_test.list: $(EXECUTABLES) makefile objects.list $(OPTIONAL_TOOL_DEPS)
+	arm-none-eabi-objdump -h -S $(EXECUTABLES) > "stm32L4_LoRa_Hop_test.list"
 	@echo 'Finished building: $@'
 	@echo ' '
 
 # Other Targets
 clean:
-	-$(RM) BC_LoRa_Hop_test.elf BC_LoRa_Hop_test.list BC_LoRa_Hop_test.map default.size.stdout
+	-$(RM) default.size.stdout stm32L4_LoRa_Hop_test.elf stm32L4_LoRa_Hop_test.list stm32L4_LoRa_Hop_test.map
 	-@echo ' '
 
 secondary-outputs: $(SIZE_OUTPUT) $(OBJDUMP_LIST)

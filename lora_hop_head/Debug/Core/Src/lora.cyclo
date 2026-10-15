@@ -22,4 +22,4 @@
 ../Core/Src/lora.c:542:6:rfm95_send	18
 ../Core/Src/lora.c:608:6:rfm95_enter_rx_mode	8
 ../Core/Src/lora.c:645:6:rfm95_receive	13
-../Core/Src/lora.c:711:6:rfm95_on_interrupt	2
+../Core/Src/lora.c:715:6:rfm95_on_interrupt	2

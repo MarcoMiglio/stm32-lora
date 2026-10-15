@@ -374,7 +374,7 @@ bool rfm95_send(rfm95_handle_t *handle, const uint8_t *send_data, size_t send_da
 
 bool rfm95_enter_rx_mode(rfm95_handle_t *handle);
 
-bool rfm95_receive(rfm95_handle_t *handle, uint8_t *rx_buff, uint8_t *rx_data_length);
+bool rfm95_receive(rfm95_handle_t *handle, uint8_t *rx_buff, uint8_t *rx_data_length, int8_t* snr, int16_t* rssi);
 
 void rfm95_on_interrupt(rfm95_handle_t *handle, rfm95_interrupt_t interrupt);
 

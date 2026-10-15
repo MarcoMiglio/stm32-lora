@@ -642,7 +642,7 @@ bool rfm95_enter_rx_mode(rfm95_handle_t *handle){
  *
  * @return true if no errors occurred.
  */
-bool rfm95_receive(rfm95_handle_t *handle, uint8_t *rx_buff, uint8_t *rx_data_length){
+bool rfm95_receive(rfm95_handle_t *handle, uint8_t *rx_buff, uint8_t *rx_data_length, int8_t *snr, int16_t *rssi){
 
   // Move modem to LoRa standby.
   if (handle->rfm_status != STNBY_MODE){
@@ -681,6 +681,10 @@ bool rfm95_receive(rfm95_handle_t *handle, uint8_t *rx_buff, uint8_t *rx_data_le
     write_register(handle, RFM95_REGISTER_OP_MODE, RFM95_OP_MODE_LORA_SLEEP);
     return false;
   }
+
+  // Get RX param
+  rfm95_getSNR(handle,  snr);
+	rfm95_getRSSI(handle, rssi);
 
   // Read packet location within the FIFO buffer
   uint8_t fifo_rx_entry;
