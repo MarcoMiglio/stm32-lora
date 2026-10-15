@@ -9,6 +9,7 @@ Code was tested using STM32L4 + RFM95.
 - BC_lora_hop_test contains "test_code" code designed for a custom node (i.e. not valid for Nucleo Boards).
 - lora_hop_head contains code for the NODE-0 -> It simply schedules TX acknowledgments for other nodes and prints on serial all the received payloads (Connect a laptop to analyze all the data).
 - pythonCode contains code used to read and parse serial connected to "lora_hop_head"-NODE.
+- BC_lora_hop_ENV contains code designed for a custom node (i.e. not valid for Nucleo Boards): emulates ENV NODE with periodi TX and ALARM signaling
 
 
 
