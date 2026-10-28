@@ -12,6 +12,7 @@
 #include "buff_manager.h"
 #include "sys_settings.h"
 #include "lora.h"
+#include "network_manager.h"
 
 
 // --------------------------------------- STRUCTURES/TYPEDEFs --------------------------------------------
@@ -21,17 +22,18 @@ typedef struct {
     uint8_t status_flags; // each bit is a status flag
 } events_flags;
 
-#define EVT_RFM_SPI_ERR      (1 << 0)
-#define EVT_RFM_RX_ERR       (1 << 1)
-#define EVT_RX_FIFO_FULL     (1 << 2)
-#define EVT_BAD_PKT_FORMAT   (1 << 3)
+#define EVT_RFM_SPI_ERR      		 (1 << 0)
+#define EVT_RFM_RX_ERR       		 (1 << 1)
+#define EVT_RX_FIFO_FULL     		 (1 << 2)
+#define EVT_BAD_PKT_FORMAT   		 (1 << 3)
 
-#define EVT_SCHEDULE_PRI_TX  (1 << 0)
-#define EVT_SCHEDULE_TX      (1 << 1)
-#define EVT_RFM_MODEM_RX     (1 << 2)
-#define EVT_TX_FIFO_EMPTY    (1 << 3)
-#define EVT_ALARM_PKT        (1 << 4)
-#define EVT_SCHEDULE_ACK     (1 << 5)
+#define EVT_SCHEDULE_PRI_TX  		 (1 << 0)
+#define EVT_SCHEDULE_TX      		 (1 << 1)
+#define EVT_RFM_MODEM_RX   		   (1 << 2)
+#define EVT_TX_FIFO_EMPTY        (1 << 3)
+#define EVT_ALARM_PKT        		 (1 << 4)
+#define EVT_SCHEDULE_ACK       	 (1 << 5)
+#define EVT_SCHEDULE_PERIODIC_TX (1 << 6)
 
 
 // --------------------------------------------------------------------------------------------------------
@@ -39,9 +41,9 @@ typedef struct {
 
 // ---------------------------------------- Function prototypes -------------------------------------------
 
-events_flags on_rx_event(rfm95_handle_t* h_rfm, h_rx_tx* h_fifo);
+events_flags on_rx_event(rfm95_handle_t* h_rfm, h_rx_tx* h_fifo, network_ctx_t *h_net);
 
-events_flags on_tx_event(rfm95_handle_t* h_rfm, h_rx_tx* h_fifo);
+events_flags on_tx_event(rfm95_handle_t* h_rfm, h_rx_tx* h_fifo, network_ctx_t *h_net);
 
 // --------------------------------------------------------------------------------------------------------
 

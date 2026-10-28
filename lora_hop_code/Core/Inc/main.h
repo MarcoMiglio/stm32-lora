@@ -43,6 +43,8 @@ extern "C" {
 typedef enum{
   SYS_HANDLE_RX,
   SYS_HANLDE_TX,
+	SYS_HANDLE_MODE_SWITCH,
+	SYS_HANDLE_DISCOVERY_TX,
   SYS_HANDLE_ERR,
   SYS_HANDLE_TIMEOUT,
   SYS_RDY
@@ -66,10 +68,11 @@ typedef enum {
  */
 typedef struct{
   //volatile Sys_event_flags evt_flags;
-  volatile bool rx_pending;       // Set by EXTI DIO0
-	volatile bool tx_pending;       // Set by: RTC wake-up, schedule_tx_evt, schedule_alrmOFF_evt
-	volatile bool err_pending;      // RFU
-	volatile bool timeout_pending;  // RFU
+  volatile bool rx_pending;       		// Set by EXTI DIO0
+	volatile bool tx_pending;       		// Set by: RTC wake-up, schedule_tx_evt, schedule_alrmOFF_evt
+	volatile bool deploy_pending;				// Set by: EXTI mode selector
+	volatile bool err_pending;      		// RFU
+	volatile bool timeout_pending;  		// RFU
   Sys_state state;
 } Sys_handler;
 
@@ -94,6 +97,15 @@ void Error_Handler(void);
 /* USER CODE END EFP */
 
 /* Private defines -----------------------------------------------------------*/
+#define RED_LED_Pin GPIO_PIN_5
+#define RED_LED_GPIO_Port GPIOC
+#define YELLOW_LED_Pin GPIO_PIN_13
+#define YELLOW_LED_GPIO_Port GPIOB
+#define GREEN_LED_Pin GPIO_PIN_14
+#define GREEN_LED_GPIO_Port GPIOB
+#define MODE_SEL_Pin GPIO_PIN_15
+#define MODE_SEL_GPIO_Port GPIOB
+#define MODE_SEL_EXTI_IRQn EXTI15_10_IRQn
 #define RFM95_DIO0_Pin GPIO_PIN_9
 #define RFM95_DIO0_GPIO_Port GPIOA
 #define RFM95_DIO0_EXTI_IRQn EXTI9_5_IRQn

@@ -9,8 +9,8 @@
 #define INC_LORA_H_
 
 #include <stdbool.h>
-#include "stm32l4xx_hal.h"
 #include "sys_settings.h"
+#include "stm32l4xx_hal.h"
 
 
 // -------------------------- RFM generic settings ----------------------------------

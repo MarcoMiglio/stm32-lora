@@ -10,6 +10,8 @@ C_SRCS += \
 ../Core/Src/buff_manager.c \
 ../Core/Src/lora.c \
 ../Core/Src/main.c \
+../Core/Src/network_manager.c \
+../Core/Src/status_led.c \
 ../Core/Src/stm32l4xx_hal_msp.c \
 ../Core/Src/stm32l4xx_it.c \
 ../Core/Src/syscalls.c \
@@ -22,6 +24,8 @@ OBJS += \
 ./Core/Src/buff_manager.o \
 ./Core/Src/lora.o \
 ./Core/Src/main.o \
+./Core/Src/network_manager.o \
+./Core/Src/status_led.o \
 ./Core/Src/stm32l4xx_hal_msp.o \
 ./Core/Src/stm32l4xx_it.o \
 ./Core/Src/syscalls.o \
@@ -34,6 +38,8 @@ C_DEPS += \
 ./Core/Src/buff_manager.d \
 ./Core/Src/lora.d \
 ./Core/Src/main.d \
+./Core/Src/network_manager.d \
+./Core/Src/status_led.d \
 ./Core/Src/stm32l4xx_hal_msp.d \
 ./Core/Src/stm32l4xx_it.d \
 ./Core/Src/syscalls.d \
@@ -48,7 +54,7 @@ Core/Src/%.o Core/Src/%.su Core/Src/%.cyclo: ../Core/Src/%.c Core/Src/subdir.mk
 clean: clean-Core-2f-Src
 
 clean-Core-2f-Src:
-	-$(RM) ./Core/Src/LinkedList.cyclo ./Core/Src/LinkedList.d ./Core/Src/LinkedList.o ./Core/Src/LinkedList.su ./Core/Src/app_events.cyclo ./Core/Src/app_events.d ./Core/Src/app_events.o ./Core/Src/app_events.su ./Core/Src/buff_manager.cyclo ./Core/Src/buff_manager.d ./Core/Src/buff_manager.o ./Core/Src/buff_manager.su ./Core/Src/lora.cyclo ./Core/Src/lora.d ./Core/Src/lora.o ./Core/Src/lora.su ./Core/Src/main.cyclo ./Core/Src/main.d ./Core/Src/main.o ./Core/Src/main.su ./Core/Src/stm32l4xx_hal_msp.cyclo ./Core/Src/stm32l4xx_hal_msp.d ./Core/Src/stm32l4xx_hal_msp.o ./Core/Src/stm32l4xx_hal_msp.su ./Core/Src/stm32l4xx_it.cyclo ./Core/Src/stm32l4xx_it.d ./Core/Src/stm32l4xx_it.o ./Core/Src/stm32l4xx_it.su ./Core/Src/syscalls.cyclo ./Core/Src/syscalls.d ./Core/Src/syscalls.o ./Core/Src/syscalls.su ./Core/Src/sysmem.cyclo ./Core/Src/sysmem.d ./Core/Src/sysmem.o ./Core/Src/sysmem.su ./Core/Src/system_stm32l4xx.cyclo ./Core/Src/system_stm32l4xx.d ./Core/Src/system_stm32l4xx.o ./Core/Src/system_stm32l4xx.su
+	-$(RM) ./Core/Src/LinkedList.cyclo ./Core/Src/LinkedList.d ./Core/Src/LinkedList.o ./Core/Src/LinkedList.su ./Core/Src/app_events.cyclo ./Core/Src/app_events.d ./Core/Src/app_events.o ./Core/Src/app_events.su ./Core/Src/buff_manager.cyclo ./Core/Src/buff_manager.d ./Core/Src/buff_manager.o ./Core/Src/buff_manager.su ./Core/Src/lora.cyclo ./Core/Src/lora.d ./Core/Src/lora.o ./Core/Src/lora.su ./Core/Src/main.cyclo ./Core/Src/main.d ./Core/Src/main.o ./Core/Src/main.su ./Core/Src/network_manager.cyclo ./Core/Src/network_manager.d ./Core/Src/network_manager.o ./Core/Src/network_manager.su ./Core/Src/status_led.cyclo ./Core/Src/status_led.d ./Core/Src/status_led.o ./Core/Src/status_led.su ./Core/Src/stm32l4xx_hal_msp.cyclo ./Core/Src/stm32l4xx_hal_msp.d ./Core/Src/stm32l4xx_hal_msp.o ./Core/Src/stm32l4xx_hal_msp.su ./Core/Src/stm32l4xx_it.cyclo ./Core/Src/stm32l4xx_it.d ./Core/Src/stm32l4xx_it.o ./Core/Src/stm32l4xx_it.su ./Core/Src/syscalls.cyclo ./Core/Src/syscalls.d ./Core/Src/syscalls.o ./Core/Src/syscalls.su ./Core/Src/sysmem.cyclo ./Core/Src/sysmem.d ./Core/Src/sysmem.o ./Core/Src/sysmem.su ./Core/Src/system_stm32l4xx.cyclo ./Core/Src/system_stm32l4xx.d ./Core/Src/system_stm32l4xx.o ./Core/Src/system_stm32l4xx.su
 
 .PHONY: clean-Core-2f-Src
 
