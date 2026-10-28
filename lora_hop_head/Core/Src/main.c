@@ -24,12 +24,16 @@
 #include "stdio.h"
 #include "string.h"
 #include "lora.h"
+#include "network_manager.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
 // rfm95 handler
 rfm95_handle_t rfm95_handle = {0};
+
+// network staus handler
+network_ctx_t h_net = {0};
 
 // RX PKT
 typedef struct{
@@ -111,8 +115,8 @@ static void 		precision_sleep_until(uint32_t target_ticks);
 static uint8_t	get_battery_level();
 static void     rfm95_after_interrupts_configured();
 
-events_flags onRxEvt(rfm95_handle_t *h_rfm, bc_pkt *rx_pkt);
-events_flags onTxEvt(rfm95_handle_t *h_rfm, bc_pkt *tx_pkt);
+events_flags onRxEvt(rfm95_handle_t *h_rfm, bc_pkt *rx_pkt, network_ctx_t *h_net);
+events_flags onTxEvt(rfm95_handle_t *h_rfm, bc_pkt *tx_pkt, network_ctx_t *h_net);
 
 uint8_t get_random_number(uint32_t *random_number, uint16_t timeout);
 static uint16_t random_wait(uint16_t min, uint16_t max);
@@ -169,6 +173,11 @@ int main(void)
   // needed after programming -> avoid conflicts with sleep mode
   HAL_Delay(2000);
 
+  /*
+   * Initialize network context as ROOT node.
+   */
+  network_init_root(&h_net);
+
   // init RF in RX mode
   if (!init_rfm()) {
 #if DEBUG_PRINT_ON
@@ -194,62 +203,70 @@ int main(void)
 
       // Something recevived -> Process informations
       events_flags rx_flags = {0};
-      rx_flags = onRxEvt(&rfm95_handle, &rx_pkt);
+      rx_flags = onRxEvt(&rfm95_handle, &rx_pkt, &h_net);
 
-      if (rx_flags.err_flags != 0) {
+      if (rx_flags.err_flags != 0)
+      {
         // Error occurred...
         bool spi_err = rx_flags.err_flags & EVT_RFM_SPI_ERR;
         bool rx_err  = rx_flags.err_flags & EVT_RFM_RX_ERR;
         bool bad_pkt = rx_flags.err_flags & EVT_BAD_PKT_FORMAT;
 
-        if (spi_err) {
-#if DEBUG_PRINT_ON
-          printf("SPI ERROR\r\n");
-#endif
+        if (spi_err)
+        {
 
           // reset RFM and restart in RX mode
           HAL_NVIC_DisableIRQ(EXTI15_10_IRQn);
           reset_rfm(&rfm95_handle);
           init_rfm();
         }
-        if (rx_err) {
+        if (rx_err)
+        {
           // PKT dropped, do nothing...
         }
-        if (bad_pkt) {
-#if DEBUG_PRINT_ON
-          printf("BAD PKT\r\n");
-#endif
+        if (bad_pkt)
+        {
+
         }
 
-      } else {
+      }
+
+      else
+      {
         // Plot payload on serial:
-      	if (dmaRunning == false){
+      	if ((dmaRunning == false) && (serBuff_len != 0))
+      	{
       		HAL_UART_Transmit_DMA(&huart2, serBuff, serBuff_len);
 					dmaRunning = true;
       	}
       }
 
-      if (rfm95_handle.rfm_status != RXCONTIN_MODE){
+      if (rfm95_handle.rfm_status != RXCONTIN_MODE)
+      {
         // back in RX mode
         if (!tx_data) rfm95_enter_rx_mode(&rfm95_handle);
-        else {
+        else
+        {
           // Tx pending -> before going back to RX mode TX must be performed!
         }
       }
 
     }
 
-    if (tx_data) {  /* TX Pending */
+    if (tx_data)
+    {  /* TX Pending */
 
       // TX ACK for the BC nodes
       events_flags tx_err_flags = {0};
-      tx_err_flags = onTxEvt(&rfm95_handle, &rx_pkt);
+      tx_err_flags = onTxEvt(&rfm95_handle, &rx_pkt, &h_net);
 
-      if (tx_err_flags.err_flags != 0) {
+      if (tx_err_flags.err_flags != 0)
+      {
         // Error occurred...
         bool spi_err = tx_err_flags.err_flags & EVT_RFM_SPI_ERR;
 
-        if (spi_err) {
+        if (spi_err)
+        {
 #if DEBUG_PRINT_ON
           printf("SPI ERROR\r\n");
 #endif
@@ -259,28 +276,39 @@ int main(void)
           reset_rfm(&rfm95_handle);
           init_rfm();
         }
-      } else {
+      }
+
+      else
+      {
         // back in RX mode
-        rfm95_enter_rx_mode(&rfm95_handle);
+      	if (rfm95_handle.rfm_status != RXCONTIN_MODE)
+      	{
+      		rfm95_enter_rx_mode(&rfm95_handle);
+      	}
       }
 
       tx_data = 0;  // clear TX flag
     }
 
     /* Nothing left -> RFM must be in RX mode */
-    if (!rx_data && !tx_data && rfm95_handle.rfm_status != RXCONTIN_MODE) {
+    if (!rx_data && !tx_data && rfm95_handle.rfm_status != RXCONTIN_MODE)
+    {
     	// reset RFM and restart in RX mode
 			HAL_NVIC_DisableIRQ(EXTI15_10_IRQn);
 			reset_rfm(&rfm95_handle);
 			if (!init_rfm()) HAL_Delay(500);
 
-		} else { /* TRY TO SLEEP */
+		}
+
+    else
+    { /* TRY TO SLEEP */
 
 			/* atomicity ensured during sleep entering */
 			HAL_SuspendTick();
 			__disable_irq();
 
-			if (!rx_data && ! tx_data && !dmaRunning){
+			if (!rx_data && ! tx_data && !dmaRunning)
+			{
 				enterStopMode();
 			}
 
@@ -289,10 +317,6 @@ int main(void)
 			__enable_irq();
 
 		}
-
-
-
-
 
   } // End of While superloop
   /* USER CODE END 3 */
@@ -977,10 +1001,12 @@ static uint32_t get_currTime_ms(){
  *
  * @return event_flags falgs for RX events (see app_events.h in other files...)
  */
-events_flags onRxEvt(rfm95_handle_t *h_rfm, bc_pkt *rx_pkt) {
+events_flags onRxEvt(rfm95_handle_t *h_rfm, bc_pkt *rx_pkt, network_ctx_t *h_net)
+{
   /* track error flags */
   events_flags app_flags = {0};
   tx_data = false;
+  serBuff_len = 0;
 
   /* rx parameters */
   int8_t snr;
@@ -993,16 +1019,54 @@ events_flags onRxEvt(rfm95_handle_t *h_rfm, bc_pkt *rx_pkt) {
   if(!rfm95_receive(h_rfm, &rx_pkt->pl[0], &rx_pkt->pl_len, &snr, &rssi))app_flags.err_flags |= EVT_RFM_RX_ERR;
 
   /* If any error occurred, stop code here */
-  if(app_flags.err_flags != 0) {
+  if(app_flags.err_flags != 0)
+  {
     return app_flags;
   }
 
   /* read received sync word */
   uint16_t rx_sync = (uint16_t)((rx_pkt->pl[SYNC_WORD_POS] << 8) | rx_pkt->pl[SYNC_WORD_POS+1]);
 
-  /* preliminary check on payload size and SYNC words */
+
+  /* =========================================================
+   * NETWORK DISCOVERY PACKETS
+   * ========================================================= */
+  if (rx_sync == DISCOVERY_SYNC_WORD)
+  {
+		network_rx_action_t net_action =
+				network_process_rx(
+						h_net,
+						rx_pkt->pl,
+						rx_pkt->pl_len,
+						rssi,
+						snr
+				);
+
+		if (net_action == NET_RX_BAD_PACKET)
+		{
+			app_flags.err_flags |= EVT_BAD_PKT_FORMAT;
+
+			return app_flags;
+		}
+
+		/*
+		 * DISC_REQ  -> DISC_OFFER
+		 * DISC_ACCEPT -> DISC_CONFIRM
+		 */
+		if (net_action == NET_RX_SCHEDULE_TX)
+		{
+			tx_data = true;
+		}
+
+		return app_flags;
+  }
+
+  /* =========================================================
+	 * ALARM / ENVIRONMENTAL PKTs
+	 * ========================================================= */
   if (!( ((rx_pkt->pl_len == ENV_NODE_PYL_SIZE) && (rx_sync == SYNC_WORD_ENV)) ||
-         ((rx_pkt->pl_len >= BC_NODE_MIN_PYL_SIZE) && (rx_sync == SYNC_WORD_BC)) )) {
+         ((rx_pkt->pl_len >= BC_NODE_MIN_PYL_SIZE) && (rx_sync == SYNC_WORD_BC)) ))
+  {
 
     app_flags.err_flags |= EVT_BAD_PKT_FORMAT;
     return app_flags;
@@ -1021,7 +1085,8 @@ events_flags onRxEvt(rfm95_handle_t *h_rfm, bc_pkt *rx_pkt) {
   bool alarm_bit_set = (pkt_mask & MASK_ALARM_BIT) >> ALARM_BIT_POS;
 
   // rx_bcID and tx_bcID depend on subsequent conditions
-  if ((rx_pkt->pl_len == ENV_NODE_PYL_SIZE) && (rx_sync == SYNC_WORD_ENV)) {       /* receiving from an ENV NODE */
+  if ((rx_pkt->pl_len == ENV_NODE_PYL_SIZE) && (rx_sync == SYNC_WORD_ENV))		 /* receiving from an ENV NODE */
+  {
 
     // simply plot ENV node data, no TX needed...
     memcpy(serBuff, rx_pkt->pl, rx_pkt->pl_len);
@@ -1030,7 +1095,10 @@ events_flags onRxEvt(rfm95_handle_t *h_rfm, bc_pkt *rx_pkt) {
 
     serBuff_len = rx_pkt->pl_len + RSSI_BYTES;
 
-  } else if ((rx_pkt->pl_len > ENV_NODE_PYL_SIZE) && (rx_sync == SYNC_WORD_BC)) {  /* receiving fron BC NODE -> some hops happened */
+  }
+
+  else if ((rx_pkt->pl_len > ENV_NODE_PYL_SIZE) && (rx_sync == SYNC_WORD_BC))  /* receiving fron BC NODE -> some hops happened */
+  {
 
     /*
      * if receiving from bcNode, at least one Hop happened
@@ -1061,9 +1129,11 @@ events_flags onRxEvt(rfm95_handle_t *h_rfm, bc_pkt *rx_pkt) {
     // get the BC_ID of the 1st BC in the hop-sequence
     rx_pkt->rx_bcID = rx_pkt->pl[BC_ID1_POS];
 
-    if (rx_pkt->tx_bcID > MY_BC_ID) {    /* RX from node farther in the BCs sequence --> UPLINK */
+    if (rx_pkt->tx_bcID > h_net->node_id) 	/* RX from node farther in the BCs sequence --> UPLINK */
+    {
 
-      if (alarm_bit_set){ /* Uplink for ALARM PKTs */
+      if (alarm_bit_set) /* Uplink for ALARM PKTs */
+      {
 
         bool is_ack = ((rx_pkt->pl[MASK_POS] & MASK_ALARM_ACK) >> ACK_BIT_POS) & 0x01;
         // If set no TX needed...
@@ -1071,7 +1141,10 @@ events_flags onRxEvt(rfm95_handle_t *h_rfm, bc_pkt *rx_pkt) {
         // If not set -> ACK is needed
         if(!is_ack) tx_data = true;
 
-      } else {            /* Handle Uplink for normal PKTs */
+      }
+
+      else 							/* Handle Uplink for normal PKTs */
+      {
 
         // respond back with MY BC ID added
         tx_data = true;
@@ -1079,13 +1152,19 @@ events_flags onRxEvt(rfm95_handle_t *h_rfm, bc_pkt *rx_pkt) {
       }
 
 
-    } else {                            /* RX from node ahead in the BCs sequence --> ACK */
+    }
+
+    else 								/* RX from node ahead in the BCs sequence --> ACK */
+    {
 
       // Error... This node is the head!
 
     }
 
-  } else {                              /* BAD PKT format */
+  }
+
+  else 		 /* BAD PKT format */
+  {
 
     app_flags.err_flags |= EVT_BAD_PKT_FORMAT;
 
@@ -1101,23 +1180,88 @@ events_flags onRxEvt(rfm95_handle_t *h_rfm, bc_pkt *rx_pkt) {
  * Indeed, other nodes in the sequence will treat the head BC-ID PKT as an ACK.
  * (Node with higher priority in teh sequence has received the intended pkt).
  */
-events_flags onTxEvt(rfm95_handle_t *h_rfm, bc_pkt *tx_pkt){
+events_flags onTxEvt(rfm95_handle_t *h_rfm, bc_pkt *tx_pkt, network_ctx_t *h_net){
 
   events_flags app_flags = {0};
 
-  // Add This BC-informations before TX
-  tx_pkt->pl[tx_pkt->pl_len] = MY_BC_ID;
-  tx_pkt->pl_len = tx_pkt->pl_len + 1;
+  /*
+	 * ---------------------------------------------------------
+	 * NETWORK CONTROL TX
+	 * ---------------------------------------------------------
+	 *
+	 * On ROOT this can currently be:
+	 *
+	 * DISC_OFFER
+	 * DISC_CONFIRM
+	 */
+	if (h_net->pending_net_tx != NET_PKT_NONE)
+	{
+		uint8_t payload[LORA_PAYLOAD_MAX_SIZE];
+		uint8_t payload_len = 0;
 
-  /* TX payload here */
-  if (!rfm95_send(h_rfm, tx_pkt->pl, tx_pkt->pl_len)) app_flags.err_flags |= EVT_RFM_SPI_ERR;
-  if(app_flags.err_flags != 0) return app_flags;
+		if (!network_build_pending_tx(
+						h_net,
+						payload,
+						&payload_len))
+		{
+			/*
+			 * Inconsistent network state
+			 */
+			app_flags.err_flags |= EVT_BAD_PKT_FORMAT;
+			return app_flags;
+		}
 
-  /* Set RFM back to RX mode */
-  if (!rfm95_enter_rx_mode(h_rfm)) app_flags.err_flags |= EVT_RFM_SPI_ERR;
-  if(app_flags.err_flags != 0) return app_flags;
+		if (!rfm95_send(
+						h_rfm,
+						payload,
+						payload_len))
+		{
+			app_flags.err_flags |= EVT_RFM_SPI_ERR;
+			return app_flags;
+		}
 
-  return app_flags;
+		/*
+		 * Update network FSM only after successful TX.
+		 */
+		network_on_tx_done(h_net);
+	}
+
+	/*
+	 * ---------------------------------------------------------
+	 * NORMAL / ALARM ACK
+	 * ---------------------------------------------------------
+	 */
+	else
+	{
+		/*
+		 * Add ROOT node ID.
+		 */
+		tx_pkt->pl[tx_pkt->pl_len] =
+				h_net->node_id;
+
+		tx_pkt->pl_len++;
+
+		if (!rfm95_send(
+						h_rfm,
+						tx_pkt->pl,
+						tx_pkt->pl_len))
+		{
+			app_flags.err_flags |= EVT_RFM_SPI_ERR;
+
+			return app_flags;
+		}
+	}
+
+	/*
+	 * Whatever we transmitted, immediately return
+	 * to continuous RX mode.
+	 */
+	if (!rfm95_enter_rx_mode(h_rfm))
+	{
+		app_flags.err_flags |= EVT_RFM_SPI_ERR;
+	}
+
+	return app_flags;
 }
 
 // --------------------------------------------------------------------------------------

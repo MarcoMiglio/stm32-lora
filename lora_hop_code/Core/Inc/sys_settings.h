@@ -14,7 +14,10 @@
 
 #define DEBUG_PRINT_ON 0
 
-// -------------------------- LORA SETTINGS -----------------------------------
+
+/* =========================================================
+ * LORA SETTINGS
+ * ========================================================= */
 
 /*
  * LORA - SF:
@@ -63,11 +66,157 @@
  */
 #define LORA_SYNC_WORD 0xBA
 
-// ----------------------------------------------------------------------------
+/* =========================================================
+ * END OF LORA SETTINGS
+ * ========================================================= */
 
 
 
-// -------------------------- RX-TX BUFFER SETTINGS ---------------------------
+
+/* =========================================================
+ * DISCOVERY PACKETS SETTINGS
+ * ========================================================= */
+
+#define DISCOVERY_PERIOD_MIN_MS     4000
+#define DISCOVERY_PERIOD_MAX_MS     6000
+
+/* ----------------- DISCOVERY PACKET ----------------- */
+
+#define DISCOVERY_SYNC_WORD        0xD15C
+
+#define DISC_SYNC_MSB_POS          0
+#define DISC_SYNC_LSB_POS          1
+#define DISC_TYPE_POS              2
+
+#define DISC_TOKEN_3_POS           3
+#define DISC_TOKEN_2_POS           4
+#define DISC_TOKEN_1_POS           5
+#define DISC_TOKEN_0_POS           6
+
+/*
+ * These bytes have different meaning depending
+ * on packet type.
+ */
+#define DISC_PARENT_ID_POS        7
+#define DISC_NODE_ID_POS          8
+
+#define DISC_REQ_SIZE             7
+#define DISC_OFFER_SIZE           9
+#define DISC_CONFIRM_SIZE         9
+#define DISC_ACCEPT_SIZE          9
+
+/* =========================================================
+ * END OF DISCOVERY PACKETS SETTINGS
+ * ========================================================= */
+
+
+
+
+/* =========================================================
+ * LINK PACKETS SECTION
+ * ========================================================= */
+
+/* ---------------- LINK PACKET / DEPLOYMENT REQ  -------------- */
+
+/*
+ * Bytes 0 ... 8 are already used by the common
+ * network-control header:
+ *
+ * 0-1  sync word
+ * 2    packet type
+ * 3-6  transaction token
+ * 7    parent ID
+ * 8    child ID
+ */
+
+#define LINK_SEQ_MSB_POS       9u
+#define LINK_SEQ_LSB_POS      10u
+
+/*
+ * Only LINK_REPLY contains these fields.
+ */
+#define LINK_RSSI_MSB_POS     11u
+#define LINK_RSSI_LSB_POS     12u
+#define LINK_SNR_POS          13u
+
+#define LINK_PROBE_SIZE       11u
+#define LINK_REPLY_SIZE       14u
+
+/*
+ * Only for DEPLOYMENT REQ
+ */
+#define DEPLOY_REQ_SIZE       9u
+#define DEPLOY_CONFIRM_SIZE   9u
+
+// -----------------------------------------------------
+
+
+/* ----------------- LINK/DEPLOYMENT PACKET SETTINGS ----------------- */
+
+#define LINK_WINDOW_SIZE       10u
+
+/*
+ * Specify the percentile which will be computed as evaluation metric
+ * for the link quality.
+ *
+ * use only integers from 1u to 100u
+ */
+#define LINK_METRICS_PERCENTILE 20u
+
+/*
+ * Fixed period between two consecutive probes.
+ *
+ * This period is also the maximum waiting time
+ * for the reply to the previous probe.
+ */
+#define LINK_TEST_PERIOD_MS    2000u
+
+/*
+ * Retry interval while waiting for DEPLOY_CONFIRM.
+ */
+#define MIN_WAIT_DEPLOY_RETX_MS   1000u
+#define MAX_WAIT_DEPLOY_RETX_MS   2000u
+
+// -------------------------------------------------------
+
+
+// -------------------- LINK QUALITY DECISION -----------------------
+
+/*
+ * With a ten-attempt window:
+ *
+ * 90-100% -> candidate GOOD
+ * 70-80%  -> MARGINAL
+ * 0-60%   -> BAD
+ */
+#define LINK_SUCCESS_RATE_GOOD_MIN_PCT    90u
+#define LINK_SUCCESS_RATE_BAD_MAX_PCT     60u
+
+
+/*
+ * Minimum acceptable 20th-percentile values
+ * for declaring the link GOOD.
+ *
+ * These are initial calibration values.
+ * They must later be tuned using the actual
+ * SF, BW, power and tunnel measurements.
+ */
+#define LINK_RSSI_PERC_GOOD_MIN_DBM      (-115)
+#define LINK_SNR_PERC_GOOD_MIN_DB          (-5)
+
+// -------------------------------------------------------
+
+/* =========================================================
+ * END OF LINK PACKETS SECTION
+ * ========================================================= */
+
+
+
+/* =========================================================
+ * RX-TX BUFFER SETTINGS
+ * ========================================================= */
+
+// --------------------- RX - TX BUFFER SETTINGS ---------------------
 
 /*
  * how many packets can be stored simultaneously in the RX/TX FIFO Buffer
@@ -79,11 +228,6 @@
  * How many BreadCrumbs are used
  */
 #define BC_NUMBER 10
-
-/*
- * BC_ID for this NODE
- */
-#define MY_BC_ID 1
 
 /*
  * Number of retransmissions before dropping a packet
@@ -168,37 +312,6 @@
 #define ALARM_TIMEOUT_MS      30 * 1000 // In ms (do not modify!)
 
 // -----------------------------------------------------------------------------
-
-
-// --------------------------- RTC VARIABLES (RFU) -----------------------------
-
-/*
- * Modify these 3 if needed
- */
-#define START_DAY    0x01
-#define START_MONTH  0x08
-#define START_YEAR   0x25
-
-/*
- * Constants that shouldn't be accessed
- */
-
-// BCD to Decimal macro -> Convert RTC format into deciamal values
-#define BCD_TO_DEC(x)    (((x) >> 4) * 10 + ((x) & 0x0F))
-
-#define START_DAY_DEC     BCD_TO_DEC(START_DAY)
-#define START_MONTH_DEC   BCD_TO_DEC(START_MONTH)
-#define START_YEAR_DEC    BCD_TO_DEC(START_YEAR)
-
-#define MS_PER_S     1000
-#define S_PER_HOUR   3600
-#define S_PER_MIN    60
-#define M_PER_HOUR   60
-#define H_PER_DAY    24
-
-#define MS_PER_DAY   ((H_PER_DAY) * (S_PER_HOUR) * (MS_PER_S))
-// -----------------------------------------------------------------------------
-
 
 
 // ----------------- RX - TX BUFFER CONSTANTS (used at runtime) ----------------
@@ -296,5 +409,51 @@
 #define BC_NODE_MIN_PYL_SIZE SYNC_WORD_BYTES + MASK_BYTES + NODE_ID_BYTES + PKT_ID_BYTES + SENSOR_PLD_BYTES + RSSI_BYTES + BC_ID_BYTES
 
 // -----------------------------------------------------------------------------
+
+
+/* =========================================================
+ * END OF RX-TX BUFFER SETTINGS
+ * ========================================================= */
+
+
+
+
+/* =========================================================
+ * RTC VARIABLES / SETTINGS
+ * ========================================================= */
+
+// --------------------------- RTC VARIABLES (RFU) -----------------------------
+
+/*
+ * Modify these 3 if needed
+ */
+#define START_DAY    0x01
+#define START_MONTH  0x08
+#define START_YEAR   0x25
+
+/*
+ * Constants that shouldn't be accessed
+ */
+
+// BCD to Decimal macro -> Convert RTC format into deciamal values
+#define BCD_TO_DEC(x)    (((x) >> 4) * 10 + ((x) & 0x0F))
+
+#define START_DAY_DEC     BCD_TO_DEC(START_DAY)
+#define START_MONTH_DEC   BCD_TO_DEC(START_MONTH)
+#define START_YEAR_DEC    BCD_TO_DEC(START_YEAR)
+
+#define MS_PER_S     1000
+#define S_PER_HOUR   3600
+#define S_PER_MIN    60
+#define M_PER_HOUR   60
+#define H_PER_DAY    24
+
+#define MS_PER_DAY   ((H_PER_DAY) * (S_PER_HOUR) * (MS_PER_S))
+
+// -----------------------------------------------------------------------------
+
+/* =========================================================
+ * END OF RTC VARIABLES / SETTINGS
+ * ========================================================= */
 
 #endif /* INC_SYS_SETTINGS_H_ */

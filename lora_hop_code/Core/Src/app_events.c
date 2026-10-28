@@ -43,7 +43,7 @@
  *            should TX that pkt (tail in the LL sequence) in the next TX event.
  *
  */
-static events_flags process_bcNode_up(h_rx_tx* h_fifo, bc_pkt* rx_pkt){
+static events_flags process_bcNode_up(h_rx_tx* h_fifo, bc_pkt* rx_pkt, network_ctx_t* h_net){
   /* track error flags */
   events_flags app_flags = {0};
   uint16_t fifo_err_status;
@@ -140,7 +140,7 @@ static events_flags process_bcNode_up(h_rx_tx* h_fifo, bc_pkt* rx_pkt){
   if (add_new_pkt == true) { /* If the flag is still set -> Add pkt */
 
     // add my bc ID informations:
-    rx_pkt->pl[rx_pkt->pl_len] = MY_BC_ID;
+    rx_pkt->pl[rx_pkt->pl_len] = h_net->node_id;
     rx_pkt->pl_len = rx_pkt->pl_len + 1;
 
     fifo_err_status = add_pkt(h_fifo, add_idx, rx_pkt);
@@ -199,7 +199,7 @@ static events_flags process_bcNode_up(h_rx_tx* h_fifo, bc_pkt* rx_pkt){
  *            should TX that pkt (tail in the LL sequence) in the next TX event.
  *
  */
-static events_flags process_bcNode_up_alarm(h_rx_tx* h_fifo, bc_pkt* rx_pkt){
+static events_flags process_bcNode_up_alarm(h_rx_tx* h_fifo, bc_pkt* rx_pkt, network_ctx_t* h_net){
   /* track error flags */
   events_flags app_flags = {0};
   uint16_t fifo_err_status;
@@ -369,7 +369,7 @@ static events_flags process_bcNode_up_alarm(h_rx_tx* h_fifo, bc_pkt* rx_pkt){
   } else if (add_new_pkt == true) { /* If the flag is still set -> Add pkt */
 
     // add my bc ID informations:
-    rx_pkt->pl[rx_pkt->pl_len] = MY_BC_ID;
+    rx_pkt->pl[rx_pkt->pl_len] = h_net->node_id;
     rx_pkt->pl_len = rx_pkt->pl_len + 1;
 
     // make sure ACK bit not set
@@ -428,7 +428,7 @@ static events_flags process_bcNode_up_alarm(h_rx_tx* h_fifo, bc_pkt* rx_pkt){
  *            should TX that pkt (tail in the LL sequence) in the next TX event.
  *
  */
-static events_flags process_envNode_up(h_rx_tx* h_fifo, bc_pkt* rx_pkt, int16_t rssi){
+static events_flags process_envNode_up(h_rx_tx* h_fifo, bc_pkt* rx_pkt, network_ctx_t* h_net, int16_t rssi){
   /* track error flags */
   events_flags app_flags = {0};
   uint16_t fifo_err_status;
@@ -468,7 +468,7 @@ static events_flags process_envNode_up(h_rx_tx* h_fifo, bc_pkt* rx_pkt, int16_t 
 
         } else if((rx_pkt->pktID == c_node.pkt.pktID)) {/* Same identical pktID (i.e. same information) */
 
-          if (c_node.pkt.rx_bcID == MY_BC_ID){
+          if (c_node.pkt.rx_bcID == h_net->node_id){
             /*
              * The env node is adding redundancy, but i have already seen
              * this PKT -> ignore
@@ -524,8 +524,8 @@ static events_flags process_envNode_up(h_rx_tx* h_fifo, bc_pkt* rx_pkt, int16_t 
     rx_pkt->pl_len += 2;
 
     // add my bc ID informations:
-    rx_pkt->rx_bcID = MY_BC_ID;
-    rx_pkt->pl[rx_pkt->pl_len] = MY_BC_ID;
+    rx_pkt->rx_bcID = h_net->node_id;
+    rx_pkt->pl[rx_pkt->pl_len] = h_net->node_id;
     rx_pkt->pl_len = rx_pkt->pl_len + 1;
 
     fifo_err_status = add_pkt(h_fifo, add_idx, rx_pkt);
@@ -615,6 +615,73 @@ static events_flags process_bcNode_ack(h_rx_tx* h_fifo, bc_pkt* rx_pkt){
   return app_flags;
 }
 
+
+/*
+ *
+ */
+static uint8_t get_next_tx_status(
+	h_rx_tx *h_fifo,
+	network_ctx_t *h_net
+)
+{
+	network_tx_priority_t net_pri =
+			network_get_tx_priority(h_net);
+
+	/*
+	 * Non-deployed nodes must completely ignore
+	 * DATA/ALARM TX queues.
+	 */
+	uint16_t data_pri = LL_BUFF_EMPTY;
+
+	if (h_net->state == NODE_DEPLOYED)
+	{
+		data_pri = get_nextTX_pri(h_fifo);
+	}
+
+
+	/*
+	 * Something high-priority is pending.
+	 */
+	if ((net_pri  == NET_TX_PRIORITY) ||
+			(data_pri == TX_BUFF_PRI))
+	{
+		return EVT_SCHEDULE_PRI_TX;
+	}
+
+
+	/*
+	 * Retransmissions.
+	 */
+	if ((net_pri  == NET_TX_RETX) ||
+			(data_pri == TX_BUFF_NO_PRI))
+	{
+		return EVT_SCHEDULE_TX;
+	}
+
+
+	/*
+	 * Lowest priority: periodic discovery.
+	 */
+	if (net_pri == NET_TX_PERIODIC)
+	{
+		return EVT_SCHEDULE_PERIODIC_TX;
+	}
+
+	/*
+	 * After transmitting LINK_PROBE,
+	 * pending_net_tx becomes NONE, but another
+	 * periodic event is still required.
+	 */
+	if ((h_net->state == NODE_ASSIGNED_PENDING_LINK) &&
+			(h_net->link.active))
+	{
+		return EVT_SCHEDULE_PERIODIC_TX;
+	}
+
+	return EVT_TX_FIFO_EMPTY;
+}
+
+
 /*
  * Handle PKT TX event for "normal operation" (no ALARM).
  *
@@ -637,7 +704,7 @@ static events_flags process_bcNode_ack(h_rx_tx* h_fifo, bc_pkt* rx_pkt){
 static events_flags handle_PktTX(rfm95_handle_t* h_rfm, h_rx_tx* h_fifo){
   /* track error flags */
   events_flags app_flags = {0};
-  uint16_t fifo_status;
+  //uint16_t fifo_status;
   uint16_t tx_idx = 0;
 
   uint8_t pyl_buff[LORA_PAYLOAD_MAX_SIZE];
@@ -676,24 +743,24 @@ static events_flags handle_PktTX(rfm95_handle_t* h_rfm, h_rx_tx* h_fifo){
 
   }
 
-  /* get updated TX queue status */
-  fifo_status = get_nextTX_pri(h_fifo);
-
-  if (fifo_status == LL_BUFF_EMPTY){                /* TX BUFF EMPTY -> Sop TX timer */
-
-    app_flags.status_flags |= EVT_TX_FIFO_EMPTY;
-
-  } else if (fifo_status == TX_BUFF_PRI) {          /* TX Buff has "new PKTs" -> short wait */
-
-    app_flags.status_flags |= EVT_SCHEDULE_PRI_TX;
-
-  } else if (fifo_status == TX_BUFF_NO_PRI) {       /* TX Buff has "old PKTs" -> longer wait for reTX*/
-
-    app_flags.status_flags |= EVT_SCHEDULE_TX;
-
-  } else {                                          /* RFU... */
-    //RFU...
-  }
+//  /* get updated TX queue status */
+//  fifo_status = get_nextTX_pri(h_fifo);
+//
+//  if (fifo_status == LL_BUFF_EMPTY){                /* TX BUFF EMPTY -> Sop TX timer */
+//
+//    app_flags.status_flags |= EVT_TX_FIFO_EMPTY;
+//
+//  } else if (fifo_status == TX_BUFF_PRI) {          /* TX Buff has "new PKTs" -> short wait */
+//
+//    app_flags.status_flags |= EVT_SCHEDULE_PRI_TX;
+//
+//  } else if (fifo_status == TX_BUFF_NO_PRI) {       /* TX Buff has "old PKTs" -> longer wait for reTX*/
+//
+//    app_flags.status_flags |= EVT_SCHEDULE_TX;
+//
+//  } else {                                          /* RFU... */
+//    //RFU...
+//  }
 
   return app_flags;
 }
@@ -781,6 +848,81 @@ static events_flags handle_AlarmTX(rfm95_handle_t* h_rfm, h_rx_tx* h_fifo){
   return app_flags;
 }
 
+/*
+ * Handle PKT TX event for DISCOVERY events.
+ *
+ * @param rfm95_handle_t* h_rfm   handler for the RFM95 LoRa transceiver
+ * @param network_ctx_t*  h_net   rx-tx queues handler;
+ *
+ * @return: events_flags, bit-field structure with all possible errors.
+ *
+ *          ERROR FLAGS (in .err_flags field):
+ *          - EVT_RFM_SPI_ERR set if SPI error occured between RFM95 and MCU
+ *
+ *          STATUS FLAGS (in .status_flags field):
+ *          - EVT_TX_FIFO_EMPTY is set if no pkts are waiting for TX (all TX more than TX_ATTEMPTS_THRESHOLD times)
+ *                             --> controller should schedule a timer to quit ALARM mode.
+ *          - EVT_SCHEDULE_PRI_TX is set if the TX queue contains "new PKTs" waiting for 1st TX or ACK PKTs
+ *                             --> The next TX event should be rescheduled with short wait time
+ *          - EVT_SCHEDULE_TX set if the TX queue contains only "old PKTs" (i.e. waiting for reTX)
+ *                             --> The next TX event should be rescheduled with longer wait time
+ */
+static events_flags handle_NetworkTX(
+    rfm95_handle_t *h_rfm,
+    network_ctx_t *h_net
+)
+{
+	events_flags app_flags = {0};
+
+	uint8_t payload[LORA_PAYLOAD_MAX_SIZE];
+	uint8_t payload_len = 0;
+
+
+	/*
+	 * Build currently pending network-control packet.
+	 */
+	if (!network_build_pending_tx(
+					h_net,
+					payload,
+					&payload_len))
+	{
+		return app_flags;
+	}
+
+
+	/*
+	 * TX payload.
+	 */
+	if (!rfm95_send(
+					h_rfm,
+					payload,
+					payload_len))
+	{
+		app_flags.err_flags |= EVT_RFM_SPI_ERR;
+
+		return app_flags;
+	}
+
+
+	/*
+	 * Return immediately to continuous RX.
+	 */
+	if (!rfm95_enter_rx_mode(h_rfm))
+	{
+		app_flags.err_flags |= EVT_RFM_SPI_ERR;
+
+		return app_flags;
+	}
+
+
+	/*
+	 * Update discovery FSM only after successful TX.
+	 */
+	network_on_tx_done(h_net);
+
+	return app_flags;
+}
+
 
 // ---------------------------------------------------- END OF STATIC BLOCK --------------------------------------------------------------
 
@@ -802,6 +944,7 @@ static events_flags handle_AlarmTX(rfm95_handle_t* h_rfm, h_rx_tx* h_fifo){
  *
  * @param rfm95_handle_t* h_rfm   handler for the RFM95 LoRa transceiver
  * @param h_rx_tx*        h_fifo  rx-tx queues handler
+ * @param network_ctx_t*	h_net   network status handler (DISCOVERY, DEPLOYED)
  *
  * @return: events_flags, bit-field structure with all possible errors.
  *
@@ -820,7 +963,7 @@ static events_flags handle_AlarmTX(rfm95_handle_t* h_rfm, h_rx_tx* h_fifo){
  *            should TX that pkt (tail in the LL sequence) in the next TX event (i.e. treat as high priority).
  *
  */
-events_flags on_rx_event(rfm95_handle_t* h_rfm, h_rx_tx* h_fifo){
+events_flags on_rx_event(rfm95_handle_t* h_rfm, h_rx_tx* h_fifo, network_ctx_t *h_net){
 
   /* track error flags */
   events_flags app_flags = {0};
@@ -850,6 +993,25 @@ events_flags on_rx_event(rfm95_handle_t* h_rfm, h_rx_tx* h_fifo){
 
   /* read received sync word */
   uint16_t rx_sync = (uint16_t)((rx_pkt.pl[SYNC_WORD_POS] << 8) | rx_pkt.pl[SYNC_WORD_POS+1]);
+
+  if (h_net->state != NODE_DEPLOYED) {
+
+  	network_rx_action_t net_rx = NET_RX_NO_ACTION;
+
+  	/* check sync and size for discovery PKT */
+		if (
+				((rx_pkt.pl_len >= DISC_REQ_SIZE) && (rx_pkt.pl_len <= LINK_REPLY_SIZE)) &&
+				(rx_sync == DISCOVERY_SYNC_WORD))
+		{
+			net_rx = network_process_rx(h_net, &rx_pkt.pl[0], rx_pkt.pl_len, rssi, snr);
+
+			if (net_rx == NET_RX_BAD_PACKET)  app_flags.err_flags    |= EVT_BAD_PKT_FORMAT;
+			if (net_rx == NET_RX_SCHEDULE_TX) app_flags.status_flags |= EVT_SCHEDULE_PRI_TX;
+		}
+
+		/* Skip normal operating mode until this BC moves in DEPLOYED state */
+		return app_flags;
+  }
 
   /* preliminary check on payload size and SYNC words */
   if (!( ((rx_pkt.pl_len == ENV_NODE_PYL_SIZE) && (rx_sync == SYNC_WORD_ENV)) ||
@@ -891,7 +1053,7 @@ events_flags on_rx_event(rfm95_handle_t* h_rfm, h_rx_tx* h_fifo){
   // rx_bcID and tx_bcID depend on subsequent conditions
   if ((rx_pkt.pl_len == ENV_NODE_PYL_SIZE) && (rx_sync == SYNC_WORD_ENV)) {       /* receiving from an ENV NODE */
 
-    events_flags new_flags = process_envNode_up(h_fifo, &rx_pkt, rssi);
+    events_flags new_flags = process_envNode_up(h_fifo, &rx_pkt, h_net, rssi);
     app_flags.err_flags    |= new_flags.err_flags;
     app_flags.status_flags |= new_flags.status_flags;
 
@@ -906,17 +1068,17 @@ events_flags on_rx_event(rfm95_handle_t* h_rfm, h_rx_tx* h_fifo){
     // get the BC_ID of the 1st BC in the hop-sequence
     rx_pkt.rx_bcID = rx_pkt.pl[BC_ID1_POS];
 
-    if (rx_pkt.tx_bcID > MY_BC_ID) {    /* RX from node further in the BCs sequence --> UPLINK */
+    if (rx_pkt.tx_bcID > h_net->node_id) {    /* RX from node further in the BCs sequence --> UPLINK */
 
       events_flags new_flags = {0};
 
       if (alarm_bit_set){ /* Handle Uplink for ALARM PKTs */
 
-        new_flags = process_bcNode_up_alarm(h_fifo, &rx_pkt);
+        new_flags = process_bcNode_up_alarm(h_fifo, &rx_pkt, h_net);
 
       } else {            /* Handle Uplink for normal PKTs */
 
-        new_flags = process_bcNode_up(h_fifo, &rx_pkt);
+        new_flags = process_bcNode_up(h_fifo, &rx_pkt, h_net);
 
       }
 
@@ -983,7 +1145,7 @@ events_flags on_rx_event(rfm95_handle_t* h_rfm, h_rx_tx* h_fifo){
  *                             --> The next TX event should be rescheduled with long wait time
  *
  */
-events_flags on_tx_event(rfm95_handle_t* h_rfm, h_rx_tx* h_fifo){
+events_flags on_tx_event(rfm95_handle_t* h_rfm, h_rx_tx* h_fifo, network_ctx_t *h_net){
   /* track error flags */
   events_flags app_flags = {0};
   events_flags new_flags = {0};
@@ -1006,15 +1168,141 @@ events_flags on_tx_event(rfm95_handle_t* h_rfm, h_rx_tx* h_fifo){
   if(!rfm95_stdby(h_rfm)) app_flags.err_flags |= EVT_RFM_SPI_ERR;
   if(app_flags.err_flags != 0) goto cleanup;
 
-  if (h_fifo->state == FIFO_READY) {    /* Handle TX for normal PKTs */
-    new_flags = handle_PktTX(h_rfm, h_fifo);
-    app_flags.err_flags    |= new_flags.err_flags;
-    app_flags.status_flags |= new_flags.status_flags;
-  } else {                              /* Handle TX for ALARM PKTs */
-    new_flags = handle_AlarmTX(h_rfm, h_fifo);
-    app_flags.err_flags    |= new_flags.err_flags;
-    app_flags.status_flags |= new_flags.status_flags;
+  /*
+   * For nodes not in DEPLOYMENT, they will not
+   * forward ENV/ALARM PKTs, they can be setup
+   * before everything else.
+   *
+   * Only now prepare the next link cycle.
+   *
+   * Do not declare a timeout while the radio
+   * is actually receiving a packet.
+   */
+  if (h_net->state == NODE_ASSIGNED_PENDING_LINK)
+  {
+		network_prepare_link_cycle(h_net);
   }
+
+
+  /*
+   * ALARM has absolute priority.
+   *
+   * Only deployed nodes are allowed to process it.
+   */
+  if ((h_net->state == NODE_DEPLOYED) &&
+      (h_fifo->state != FIFO_READY))
+  {
+		new_flags = handle_AlarmTX(
+				h_rfm,
+				h_fifo
+		);
+
+		app_flags.err_flags    |= new_flags.err_flags;
+		app_flags.status_flags |= new_flags.status_flags;
+
+		goto cleanup;
+  }
+
+  /*
+   * Then move to normal/discovery PKTs
+   */
+  network_tx_priority_t net_pri =
+      network_get_tx_priority(h_net);
+
+  uint16_t data_pri = LL_BUFF_EMPTY;
+
+  if (h_net->state == NODE_DEPLOYED)
+  {
+		data_pri = get_nextTX_pri(h_fifo);
+  }
+
+  /*
+   * Priority order:
+   *
+   * 1. Network priority control
+   * 2. New DATA packet
+   * 3. Network retransmission
+   * 4. DATA retransmission
+   * 5. Periodic DISC_REQ
+   */
+
+  /* 1. Network priority control */
+  if (net_pri == NET_TX_PRIORITY)
+  {
+		new_flags =
+				handle_NetworkTX(
+						h_rfm,
+						h_net
+				);
+  }
+
+
+  /* 2. New DATA packet */
+  else if (data_pri == TX_BUFF_PRI)
+  {
+		new_flags =
+				handle_PktTX(
+						h_rfm,
+						h_fifo
+				);
+  }
+
+
+  /* 3. Network retransmission */
+  else if (net_pri == NET_TX_RETX)
+  {
+		new_flags =
+				handle_NetworkTX(
+						h_rfm,
+						h_net
+				);
+  }
+
+
+  /* 4. DATA retransmission */
+  else if (data_pri == TX_BUFF_NO_PRI)
+  {
+		new_flags =
+				handle_PktTX(
+						h_rfm,
+						h_fifo
+				);
+  }
+
+
+  /* 5. Periodic discovery */
+  else if (net_pri == NET_TX_PERIODIC)
+  {
+		new_flags =
+				handle_NetworkTX(
+						h_rfm,
+						h_net
+				);
+  }
+
+
+  /* Nothing pending */
+  else
+  {
+		app_flags.status_flags |= EVT_TX_FIFO_EMPTY;
+
+		goto cleanup;
+  }
+
+  /* Check for possible errors */
+  app_flags.err_flags |= new_flags.err_flags;
+
+  if (app_flags.err_flags != 0)
+  {
+		goto cleanup;
+  }
+
+  /* Prepare next TX mode */
+  app_flags.status_flags |=
+      get_next_tx_status(
+          h_fifo,
+          h_net
+      );
 
   // Return statement -> Flags + RFM in RX mode
   cleanup:

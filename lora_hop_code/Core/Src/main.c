@@ -27,6 +27,8 @@
 #include "sys_settings.h"
 #include "buff_manager.h"
 #include "app_events.h"
+#include "network_manager.h"
+#include "status_led.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -55,6 +57,12 @@ h_rx_tx h_buffs = {
     .h_tx  = &h_tx,
     .state = FIFO_READY
 };
+
+// Network status handler
+network_ctx_t h_net = {0};
+
+// Structure to get current link quality status during deployment
+link_metrics_t metrics = {0};
 
 // system handler
 Sys_handler h_sys = {
@@ -126,6 +134,8 @@ static inline void extend_alarm_time();
 static uint32_t get_currTime_ms();
 static inline int julian_day(int year, int month, int day);
 
+static void update_status_led(const network_ctx_t *h_net);
+
 void MySystemClock_Config(void);
 void enterStopMode();
 
@@ -186,13 +196,42 @@ int main(void)
 #endif
   }
 
-  //h_sys.evt_flags |= SYS_EVT_RX_PENDING;
+
+  /* If selector not in discovery mode */
+  if (HAL_GPIO_ReadPin(MODE_SEL_GPIO_Port, MODE_SEL_Pin) != GPIO_PIN_RESET)
+  {
+  	while(1)
+  	{
+  		HAL_GPIO_TogglePin(RED_LED_GPIO_Port, RED_LED_Pin);
+  		HAL_Delay(500);
+  	}
+  }
+
+	#if NODE_IS_ROOT
+
+	network_init_root(&h_net);
+
+	#else
+
+	network_init_unassigned(&h_net);
+
+	/* generate and assign random token to this device */
+	uint32_t discovery_token;
+	uint8_t rng_err = get_random_number(&discovery_token, 5);
+	h_net.discovery_token = discovery_token;
+
+	schedule_tx_evt(DISCOVERY_PERIOD_MIN_MS, DISCOVERY_PERIOD_MAX_MS);
+
+	#endif
 
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1){
+
+  	// Update LEDs indicators:
+  	update_status_led(&h_net);
 
     /* USER CODE END WHILE */
 
@@ -201,28 +240,49 @@ int main(void)
     /* System state machine */
     switch (h_sys.state){
 
-      case SYS_RDY:         /* Sys rdy -> submit new task or sleep */
+			/* =====================================================
+			 * SYS READY: SCHEDULE NEW EVENT
+			 * ===================================================== */
+      case SYS_RDY:
+      {
 
         /* atomicity ensured during task registration */
         HAL_SuspendTick();
         __disable_irq();
 
         /* check pending flags */
-        if (h_sys.rx_pending){         // RX event is pending
+        if (h_sys.rx_pending)									// RX event is pending
+        {
         	//h_sys.evt_flags & SYS_EVT_RX_PENDING
 
           h_sys.state = SYS_HANDLE_RX;
           //h_sys.evt_flags &= ~SYS_EVT_RX_PENDING;
           h_sys.rx_pending = 0;
 
-        } else if (h_sys.tx_pending){  // TX event is pending
+        }
+        else if (h_sys.deploy_pending)  			// DEPLOY request event
+        {
+            /*
+             * Process MODE_SEL before a potentially pending
+             * periodic LINK_PROBE TX.
+             */
+            h_sys.state =
+                SYS_HANDLE_MODE_SWITCH;
+
+            h_sys.deploy_pending =
+                false;
+        }
+        else if (h_sys.tx_pending)						// TX event is pending
+        {
         	// h_sys.evt_flags & SYS_EVT_TX_PENDING
 
           h_sys.state = SYS_HANLDE_TX;
           //h_sys.evt_flags &= ~SYS_EVT_TX_PENDING;
           h_sys.tx_pending = 0;
 
-        } else if (h_sys.err_pending){       // ERR event is pending
+        }
+        else if (h_sys.err_pending)						// ERR event is pending
+        {
         	//h_sys.evt_flags & SYS_EVT_ERROR
 
           // RFU...
@@ -230,7 +290,9 @@ int main(void)
           //h_sys.evt_flags &= ~SYS_EVT_ERROR;
           h_sys.err_pending = 0;
 
-        } else if (h_sys.timeout_pending){     // TIMEOUT event is pending
+        }
+        else if (h_sys.timeout_pending)				// TIMEOUT event is pending
+        {
         	// h_sys.evt_flags & SYS_EVT_TIMEOUT
 
           // RFU...
@@ -238,7 +300,9 @@ int main(void)
           //h_sys.evt_flags &= ~SYS_EVT_TIMEOUT;
           h_sys.timeout_pending = 0;
 
-        } else {
+        }
+        else
+        {
           // No events pending -> back to sleep
           enterStopMode();
         }
@@ -248,111 +312,153 @@ int main(void)
         __enable_irq();
 
         break;
+      }
 
-      case SYS_HANDLE_RX:        /* Sys handle RX event */
 
-//        printf("\nhandle RX\r\n");
-
+			/* =====================================================
+			 * HANDLE RECEIVE REQUEST
+			 * ===================================================== */
+			case SYS_HANDLE_RX:
+			{
         debug_pin_set();
-        app_flags = on_rx_event(&rfm95_handle, &h_buffs);
+        app_flags = on_rx_event(&rfm95_handle, &h_buffs, &h_net);
         debug_pin_rst();
 
-        if (app_flags.err_flags) {           /* If any error occurred */
+        if (app_flags.err_flags)		 /* If any error occurred */
+        {
 
           bool spi_err      = app_flags.err_flags & EVT_RFM_SPI_ERR;
           bool rx_err       = app_flags.err_flags & EVT_RFM_RX_ERR;
           bool rx_buff_full = app_flags.err_flags & EVT_RX_FIFO_FULL;
           bool bad_pkt_err  = app_flags.err_flags & EVT_BAD_PKT_FORMAT;
 
-          if (spi_err) {
-#if DEBUG_PRINT_ON
-            printf("SPI ERROR\r\n");
-#endif
-
+          if (spi_err)
+          {
             // reset RFM and restart in RX mode
             HAL_NVIC_DisableIRQ(EXTI15_10_IRQn);
             reset_rfm(&rfm95_handle);
             init_rfm();
           }
-          if (rx_err) {
+          if (rx_err)
+          {
             // PKT dropped, do nothing...
           }
-          if (rx_buff_full) {
+          if (rx_buff_full)
+          {
             // Avoid (resize FIFO Buff capacity)
-#if DEBUG_PRINT_ON
-            printf("RX FIFO Full\r\n");
-#endif
           }
-          if (bad_pkt_err) {
+          if (bad_pkt_err)
+          {
             //  Pkt ignored...
-#if DEBUG_PRINT_ON
-            printf("BAD PKT format\r\n");
-#endif
           }
 
-        } else if (app_flags.status_flags) {  /* If status flags are present */
+        }
+        else if (app_flags.status_flags)		/* If status flags are present */
+        {
 
-          bool alrm_pkt   = app_flags.status_flags & EVT_ALARM_PKT;
-          bool tx_new_pkt = app_flags.status_flags & EVT_SCHEDULE_TX;
-          bool tx_ack_pkt = app_flags.status_flags & EVT_SCHEDULE_ACK;
+          bool alrm_pkt    = app_flags.status_flags & EVT_ALARM_PKT;
+          bool tx_new_pkt  = app_flags.status_flags & EVT_SCHEDULE_TX;
+          bool tx_ack_pkt  = app_flags.status_flags & EVT_SCHEDULE_ACK;
+          bool tx_pri_evt  = app_flags.status_flags & EVT_SCHEDULE_PRI_TX;
 
-          if (alrm_pkt){
-            if (h_buffs.state != FIFO_ALARM_ON){
+          if (alrm_pkt)
+          {
+            if (h_buffs.state != FIFO_ALARM_ON)
+            {
               if(tx_new_pkt || tx_ack_pkt) h_buffs.state = FIFO_ALARM_ON;
-              else {
+              else
+              {
                 h_buffs.state = FIFO_ALARM_STDBY;
                 schedule_alrmOFF_evt();
               }
             }
           }
 
-          if (tx_new_pkt) {
-#if DEBUG_PRINT_ON
-            printf("NEW PKT\r\n");
-#endif
-            /*
-             *  New PKT pushed in the RX FIFO:
-             *  Schedule TX event, and TX
-             */
-            schedule_tx_evt(MIN_WAIT_TIME_NEW, MAX_WAIT_TIME_NEW);
-
-          } else if (tx_ack_pkt){
-#if DEBUG_PRINT_ON
-            printf("Schedule ACK\r\n");
-#endif
-            schedule_tx_evt(MIN_WAIT_TIME_ALRM_ACK, MAX_WAIT_TIME_ALRM_ACK);
-          } else {
-            // RFU...
+          if (tx_ack_pkt)
+          {
+						/*
+						 * Alarm ACK remains highest priority.
+						 */
+						schedule_tx_evt(
+								MIN_WAIT_TIME_ALRM_ACK,
+								MAX_WAIT_TIME_ALRM_ACK
+						);
           }
-
-        } else {                              /* No events pending */
-          // no events pending -> do nothing
+          else if (tx_pri_evt)
+          {
+						/*
+						 * DISC_OFFER / ACCEPT / CONFIRM
+						 */
+						schedule_tx_evt(
+								MIN_WAIT_TIME_SHORT,
+								MAX_WAIT_TIME_SHORT
+						);
+          }
+          else if (tx_new_pkt)
+          {
+						schedule_tx_evt(
+								MIN_WAIT_TIME_NEW,
+								MAX_WAIT_TIME_NEW
+						);
+          }
         }
 
         // make system ready again
         h_sys.state = SYS_RDY;
         break;
+			}
 
-      case SYS_HANLDE_TX:        /* Sys handle TX event */
 
-#if DEBUG_PRINT_ON
-        printf("\nhandle TX\r\n");
-#endif
+			/* =====================================================
+			 * HANDLE DEPLOYMENT REQUEST
+			 * ===================================================== */
+      case SYS_HANDLE_MODE_SWITCH:
+      {
+				bool accepted =
+						network_request_deployment(
+								&h_net
+						);
 
+				if (accepted)
+				{
+					/*
+					 * First DEPLOY_REQ should be sent quickly.
+					 */
+					schedule_tx_evt(
+							MIN_WAIT_TIME_SHORT,
+							MAX_WAIT_TIME_SHORT
+					);
+				}
+				else
+				{
+					// ignore...
+				}
+
+				h_sys.state =
+						SYS_RDY;
+
+				break;
+      }
+
+
+      /* =====================================================
+			 * HANDLE TRANSMISSION REQUEST
+			 * ===================================================== */
+      case SYS_HANLDE_TX:
+      {
         HAL_RTCEx_DeactivateWakeUpTimer(&hrtc);
 
         debug_pin_set();
-        app_flags = on_tx_event(&rfm95_handle, &h_buffs);
+        app_flags = on_tx_event(&rfm95_handle, &h_buffs, &h_net);
         debug_pin_rst();
 
-        if (app_flags.err_flags) {           /* If any error occurred */
+        if (app_flags.err_flags)		 /* If any error occurred */
+        {
 
           bool spi_err = app_flags.err_flags & EVT_RFM_SPI_ERR;
 
-          if (spi_err) {
-#if DEBUG_PRINT_ON
-            printf("SPI ERROR\r\n");
-#endif
+          if (spi_err)
+          {
 
             // reset RFM and restart in RX mode
             HAL_NVIC_DisableIRQ(EXTI15_10_IRQn);
@@ -364,102 +470,155 @@ int main(void)
           }
           // RFU... add other flags
 
-        } else if (app_flags.status_flags) {  /* If status flags are present */
+        }
+        else if (app_flags.status_flags)		  /* If status flags are present */
+        {
 
-          bool rfm_modem_busy = app_flags.status_flags & EVT_RFM_MODEM_RX;
-          bool tx_fifo_empty  = app_flags.status_flags & EVT_TX_FIFO_EMPTY;
-          bool tx_pri_evt     = app_flags.status_flags & EVT_SCHEDULE_PRI_TX;
-          bool tx_normal_evt  = app_flags.status_flags & EVT_SCHEDULE_TX;
+          bool rfm_modem_busy  = app_flags.status_flags & EVT_RFM_MODEM_RX;
+          bool tx_fifo_empty   = app_flags.status_flags & EVT_TX_FIFO_EMPTY;
+          bool tx_pri_evt      = app_flags.status_flags & EVT_SCHEDULE_PRI_TX;
+          bool tx_normal_evt   = app_flags.status_flags & EVT_SCHEDULE_TX;
+          bool tx_periodic_evt = app_flags.status_flags & EVT_SCHEDULE_PERIODIC_TX;
 
-          // Process event flags here:
-          if(rfm_modem_busy) {
-#if DEBUG_PRINT_ON
-            printf("Modem RX -> reschedule \r\n");
-#endif
-            //  RFM is receiving something wait for the end of RX event
-            schedule_tx_evt(MIN_WAIT_TIME_SHORT, MAX_WAIT_TIME_SHORT);
-
-          } else if (tx_fifo_empty){
-#if DEBUG_PRINT_ON
-            printf("NO TX Events\r\n");
-#endif
-
-            if (h_buffs.state == FIFO_ALARM_ON){
-              /* No alarm events are pending in TX queue */
-#if DEBUG_PRINT_ON
-              printf("ALARM standby\r\n");
-#endif
-
-              /* Program end of ALARM mode */
-              h_buffs.state = FIFO_ALARM_STDBY;
-              schedule_alrmOFF_evt();
-
-            } else if (h_buffs.state == FIFO_ALARM_STDBY){
-              /*
-               * If after an hysteresis time the system ALARM queue
-               * is still empty -> EXIT ALARM MODE
-               */
-              h_buffs.state = FIFO_READY;
-              init_buffers(&h_buffs);
-
-#if DEBUG_PRINT_ON
-              printf("Back to normal mode\r\n");
-#endif
-
-            } else {
-              // Normal operating mode -> do nothing
-            }
-
-          } else if (tx_pri_evt){
-#if DEBUG_PRINT_ON
-            printf("PRI TX PKTs\r\n");
-#endif
-            // Other new PKTs are waiting for 1st TX
-            schedule_tx_evt(MIN_WAIT_TIME_SHORT, MAX_WAIT_TIME_SHORT);
-
-          } else if (tx_normal_evt){
-
-            if (h_buffs.state == FIFO_READY) {
-              // Schedule event for PKT retransmission mechanism
-#if DEBUG_PRINT_ON
-              printf("Normal TX PKTs\r\n");
-#endif
-              schedule_tx_evt(MIN_WAIT_TIME_LONG, MAX_WAIT_TIME_LONG);
-            } else {
-              // Schedule event for ALARM PKT retransmission
-#if DEBUG_PRINT_ON
-              printf("Alarm ReTX PKTs\r\n");
-#endif
-              schedule_tx_evt(MIN_WAIT_ALRM_RETX, MAX_WAIT_ALRM_RETX);
-            }
-
-          } else {
-            // RFU...
+          if (rfm_modem_busy)
+          {
+						schedule_tx_evt(
+								MIN_WAIT_TIME_SHORT,
+								MAX_WAIT_TIME_SHORT
+						);
           }
 
-        } else {                              /* No events pending */
+          else if (tx_pri_evt)
+          {
+						schedule_tx_evt(
+								MIN_WAIT_TIME_SHORT,
+								MAX_WAIT_TIME_SHORT
+						);
+          }
+
+          else if (tx_normal_evt)
+          {
+
+          	if ((h_net.state == NODE_WAIT_DEPLOY_CONFIRM) &&
+          	    (h_net.pending_net_tx == DEPLOY_REQ))
+          	{
+          		/*
+          		 * If we are in DEPLOY_CONFIRM,
+          		 * this is a DEPLOY_REQ retransmission.
+          		 */
+							schedule_tx_evt(
+									MIN_WAIT_DEPLOY_RETX_MS,
+									MAX_WAIT_DEPLOY_RETX_MS
+							);
+          	}
+          	else if ((h_net.state == NODE_WAIT_DISC_CONFIRM) &&
+								(h_net.pending_net_tx == DISC_ACCEPT))
+						{
+          		/*
+							 * If we are waiting for DISC_CONFIRM,
+							 * this is a DISC_ACCEPT retransmission.
+							 */
+							schedule_tx_evt(
+									MIN_WAIT_TIME_LONG,
+									MAX_WAIT_TIME_LONG
+							);
+						}
+						else if (h_buffs.state == FIFO_READY)
+						{
+							schedule_tx_evt(
+									MIN_WAIT_TIME_LONG,
+									MAX_WAIT_TIME_LONG
+							);
+						}
+						else
+						{
+							schedule_tx_evt(
+									MIN_WAIT_ALRM_RETX,
+									MAX_WAIT_ALRM_RETX
+							);
+						}
+          }
+
+					else if (tx_periodic_evt)
+					{
+						if (h_net.state == NODE_DISCOVERING)
+						{
+							/*
+							 * DISC_REQ remains pending while NODE_DISCOVERING.
+							 */
+							schedule_tx_evt(
+									DISCOVERY_PERIOD_MIN_MS,
+									DISCOVERY_PERIOD_MAX_MS
+							);
+						}
+						else if (h_net.state ==
+										 NODE_ASSIGNED_PENDING_LINK)
+						{
+							/*
+							 * LINK_REQ must be rescheduled when timer has elapsed
+							 */
+							schedule_tx_evt(
+									LINK_TEST_PERIOD_MS,
+									LINK_TEST_PERIOD_MS+50U
+							);
+
+							network_get_link_metrics(&h_net, &metrics);
+						}
+					}
+
+					else if (tx_fifo_empty)
+					{
+						/*
+						 * Keep your current ALARM state handling.
+						 */
+						if (h_buffs.state == FIFO_ALARM_ON){
+							/* No alarm events are pending in TX queue */
+
+							/* Program end of ALARM mode */
+							h_buffs.state = FIFO_ALARM_STDBY;
+							schedule_alrmOFF_evt();
+
+						} else if (h_buffs.state == FIFO_ALARM_STDBY){
+							/*
+							 * If after an hysteresis time the system ALARM queue
+							 * is still empty -> EXIT ALARM MODE
+							 */
+							h_buffs.state = FIFO_READY;
+							init_buffers(&h_buffs);
+
+						} else {
+							// Normal operating mode -> do nothing
+						}
+					}
+
+        }
+        else 													 /* No events pending */
+        {
           // no events pending -> do nothing
         }
 
         // make system ready again
         h_sys.state = SYS_RDY;
         break;
+      }
 
       case SYS_HANDLE_ERR:       /* Sys handle ERR event */
-
+      {
         // RFU...
 
         // make system ready again
         h_sys.state = SYS_RDY;
         break;
+      }
 
       case SYS_HANDLE_TIMEOUT:   /* Sys handle TIMEOUT event */
-
+      {
         //RFU...
 
         // make system ready again
         h_sys.state = SYS_RDY;
         break;
+      }
 
       default:
         h_sys.state = SYS_RDY;
@@ -773,20 +932,23 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOD_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(RED_LED_GPIO_Port, RED_LED_Pin, GPIO_PIN_RESET);
+
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(GPIOB, YELLOW_LED_Pin|GREEN_LED_Pin|Test_Pin, GPIO_PIN_RESET);
+
+  /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(RFM95_RST_GPIO_Port, RFM95_RST_Pin, GPIO_PIN_SET);
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(RFM95_CS_GPIO_Port, RFM95_CS_Pin, GPIO_PIN_SET);
 
-  /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(Test_GPIO_Port, Test_Pin, GPIO_PIN_RESET);
-
   /*Configure GPIO pins : PC13 PC0 PC1 PC2
-                           PC3 PC4 PC5 PC6
-                           PC7 PC8 PC9 */
+                           PC3 PC4 PC6 PC7
+                           PC8 PC9 */
   GPIO_InitStruct.Pin = GPIO_PIN_13|GPIO_PIN_0|GPIO_PIN_1|GPIO_PIN_2
-                          |GPIO_PIN_3|GPIO_PIN_4|GPIO_PIN_5|GPIO_PIN_6
-                          |GPIO_PIN_7|GPIO_PIN_8|GPIO_PIN_9;
+                          |GPIO_PIN_3|GPIO_PIN_4|GPIO_PIN_6|GPIO_PIN_7
+                          |GPIO_PIN_8|GPIO_PIN_9;
   GPIO_InitStruct.Mode = GPIO_MODE_ANALOG;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
@@ -807,15 +969,35 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
+  /*Configure GPIO pin : RED_LED_Pin */
+  GPIO_InitStruct.Pin = RED_LED_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(RED_LED_GPIO_Port, &GPIO_InitStruct);
+
   /*Configure GPIO pins : PB0 PB1 PB2 PB10
-                           PB11 PB12 PB13 PB14
-                           PB15 PB4 PB8 PB9 */
+                           PB11 PB12 PB4 PB8
+                           PB9 */
   GPIO_InitStruct.Pin = GPIO_PIN_0|GPIO_PIN_1|GPIO_PIN_2|GPIO_PIN_10
-                          |GPIO_PIN_11|GPIO_PIN_12|GPIO_PIN_13|GPIO_PIN_14
-                          |GPIO_PIN_15|GPIO_PIN_4|GPIO_PIN_8|GPIO_PIN_9;
+                          |GPIO_PIN_11|GPIO_PIN_12|GPIO_PIN_4|GPIO_PIN_8
+                          |GPIO_PIN_9;
   GPIO_InitStruct.Mode = GPIO_MODE_ANALOG;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+
+  /*Configure GPIO pins : YELLOW_LED_Pin GREEN_LED_Pin Test_Pin */
+  GPIO_InitStruct.Pin = YELLOW_LED_Pin|GREEN_LED_Pin|Test_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : MODE_SEL_Pin */
+  GPIO_InitStruct.Pin = MODE_SEL_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
+  GPIO_InitStruct.Pull = GPIO_PULLDOWN;
+  HAL_GPIO_Init(MODE_SEL_GPIO_Port, &GPIO_InitStruct);
 
   /*Configure GPIO pins : RFM95_DIO0_Pin RFM95_DIO1_Pin RFM95_DIO5_Pin */
   GPIO_InitStruct.Pin = RFM95_DIO0_Pin|RFM95_DIO1_Pin|RFM95_DIO5_Pin;
@@ -836,13 +1018,6 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_PULLUP;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_MEDIUM;
   HAL_GPIO_Init(RFM95_CS_GPIO_Port, &GPIO_InitStruct);
-
-  /*Configure GPIO pin : Test_Pin */
-  GPIO_InitStruct.Pin = Test_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(Test_GPIO_Port, &GPIO_InitStruct);
 
   /* EXTI interrupt init*/
   HAL_NVIC_SetPriority(EXTI9_5_IRQn, 0, 0);
@@ -1091,6 +1266,8 @@ static void schedule_tx_evt(uint16_t min, uint16_t max){
   HAL_RTCEx_SetWakeUpTimer_IT(&hrtc, wakeUpCounter, RTC_WAKEUPCLOCK_RTCCLK_DIV16);
 }
 
+
+
 /*
  * TODO
  */
@@ -1173,6 +1350,158 @@ static uint32_t get_currTime_ms(){
   return now_ms;
 }
 
+
+/*
+ * Update LED indicators depending on current network status
+ *
+ * @param const network_ctx_t *h_net network context handler.
+ */
+static void update_status_led(
+    const network_ctx_t *h_net
+)
+{
+	static bool initialized = false;
+
+	static status_led_mode_t current_mode =
+			LED_STATUS_OFF;
+
+	status_led_mode_t requested_mode =
+			LED_STATUS_OFF;
+
+
+	switch (h_net->state)
+	{
+		/*
+		 * Pairing not completed:
+		 * blink all three LEDs.
+		 */
+		case NODE_DISCOVERING:
+
+		case NODE_WAIT_DISC_CONFIRM:
+
+			requested_mode =
+					LED_STATUS_DISCOVERY;
+
+			break;
+
+
+		/*
+		 * Pairing completed; link quality is being
+		 * measured or has already been classified.
+		 */
+		case NODE_ASSIGNED_PENDING_LINK:
+		{
+			link_metrics_t metrics = {0};
+
+			/*
+			 * Window not full yet:
+			 * keep the central LED blinking.
+			 */
+			if (!network_get_link_metrics(
+							h_net,
+							&metrics))
+			{
+				requested_mode =
+						LED_STATUS_LINK_TEST;
+
+				break;
+			}
+
+
+			/*
+			 * Metrics are ready.
+			 * Select a fixed LED.
+			 */
+			switch (metrics.quality)
+			{
+				case LINK_QUALITY_GOOD:
+
+					requested_mode =
+							LED_STATUS_LINK_GREEN;
+
+					break;
+
+
+				case LINK_QUALITY_MARGINAL:
+
+					requested_mode =
+							LED_STATUS_LINK_ORANGE;
+
+					break;
+
+
+				case LINK_QUALITY_BAD:
+
+					requested_mode =
+							LED_STATUS_LINK_RED;
+
+					break;
+
+
+				case LINK_QUALITY_EVALUATING:
+
+				default:
+
+					requested_mode =
+							LED_STATUS_LINK_TEST;
+
+					break;
+			}
+
+			break;
+		}
+
+
+		case NODE_WAIT_DEPLOY_CONFIRM:
+		{
+			/*
+			 * Preserve the last link-quality indication
+			 * while the deployment handshake completes.
+			 */
+			return;
+		}
+
+
+		case NODE_DEPLOYED:
+
+			/*
+			 * After deployment set desired LED status
+			 */
+			requested_mode =
+				LED_STATUS_DEPLOYED;
+
+			break;
+
+
+		default:
+
+			requested_mode =
+					LED_STATUS_OFF;
+
+			break;
+	}
+
+
+	/*
+	 * Avoid resetting the blinking phase or rewriting
+	 * GPIOs continuously when the requested mode has
+	 * not changed.
+	 */
+	if ((!initialized) ||
+			(requested_mode != current_mode))
+	{
+		status_led_set_mode(
+				requested_mode
+		);
+
+		current_mode =
+				requested_mode;
+
+		initialized =
+				true;
+	}
+}
+
 // --------------------------------------------------------------------------------------
 
 
@@ -1184,12 +1513,12 @@ static uint32_t get_currTime_ms(){
  */
 void enterStopMode(){
 
-  // Stop LPTIM and clear pending bits
-  HAL_LPTIM_Counter_Stop_IT(&hlptim1);
-  LPTIM1->ICR |= 0x3F;
-
-  // CLear LPTIM IRQ at NVIC level
-  NVIC_ClearPendingIRQ(LPTIM1_IRQn);
+//  // Stop LPTIM and clear pending bits
+//  HAL_LPTIM_Counter_Stop_IT(&hlptim1);
+//  LPTIM1->ICR |= 0x3F;
+//
+//  // CLear LPTIM IRQ at NVIC level
+//  NVIC_ClearPendingIRQ(LPTIM1_IRQn);
 
   // wake from HSI --> faster wake up sequence:
 	__HAL_RCC_WAKEUPSTOP_CLK_CONFIG(RCC_STOP_WAKEUPCLOCK_HSI);
@@ -1207,7 +1536,7 @@ void enterStopMode(){
 //	HAL_ResumeTick();
 
 	// Enable LPTIM again:
-	HAL_LPTIM_Counter_Start_IT(&hlptim1, 0xFFFF);
+//	HAL_LPTIM_Counter_Start_IT(&hlptim1, 0xFFFF);
 }
 
 
@@ -1280,6 +1609,9 @@ void MySystemClock_Config(void) {
 // Auto-reload callback for LPTIM module
 void HAL_LPTIM_AutoReloadMatchCallback(LPTIM_HandleTypeDef *hlptim){
   lptim_tick_msb += 0x10000;
+
+  // Tick LEDs indicators
+  status_led_tick();
 }
 
 // Compare match callback for LPTIM module
@@ -1299,26 +1631,41 @@ void HAL_RTCEx_WakeUpTimerEventCallback(RTC_HandleTypeDef *hrtc){
 		}
 	}
 
-  h_sys.tx_pending = true;
+	h_sys.tx_pending = true;
 }
 
 // GPIO external interrupts callback
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin){
 
 	// Events on RFM95 interrupt pins
-  if (GPIO_Pin == RFM95_DIO0_Pin) {
+  if (GPIO_Pin == RFM95_DIO0_Pin)
+  {
     rfm95_on_interrupt(&rfm95_handle, RFM95_INTERRUPT_DIO0);
 
     // something received
-    if(rfm95_handle.rfm_status == RXCONTIN_MODE) {
+    if(rfm95_handle.rfm_status == RXCONTIN_MODE)
+    {
     	//h_sys.evt_flags |= SYS_EVT_RX_PENDING;
     	h_sys.rx_pending = true;
     }
 
-  } else if (GPIO_Pin == RFM95_DIO1_Pin) {
+  }
+
+  else if (GPIO_Pin == RFM95_DIO1_Pin)
+  {
     rfm95_on_interrupt(&rfm95_handle, RFM95_INTERRUPT_DIO1);
-  } else if (GPIO_Pin == RFM95_DIO5_Pin) {
+  }
+
+  else if (GPIO_Pin == RFM95_DIO5_Pin)
+  {
     rfm95_on_interrupt(&rfm95_handle, RFM95_INTERRUPT_DIO5);
+  }
+
+  // Operating mode switch (from DISCOVERY -> DEPLOYMENT)
+  if (GPIO_Pin == MODE_SEL_Pin)
+  {
+  	h_sys.deploy_pending =
+  	        true;
   }
 }
 
